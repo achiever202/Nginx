@@ -33,11 +33,11 @@ typedef struct
 {
 	//aerospike as;
 	ngx_uint_t here;
-}ngx_http_connect_aerospike_loc_conf_t;
+}ngx_http__loc_conf_t;
 
-static char* ngx_http_connect_aerospike(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
-static void* ngx_http_connect_aerospike_create_loc_conf(ngx_conf_t *cf);
-static char* ngx_http_connect_aerospike_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child);
+static char* ngx_http_variable_life(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+static void* ngx_http_variable_life_create_loc_conf(ngx_conf_t *cf);
+static char* ngx_http_variable_life_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child);
 
 u_char one[] = "1";
 u_char two[] = "2";
@@ -46,11 +46,11 @@ u_char zero[] = "0";
 u_char ngx_connected_string[] = "Connection to aerospike successful!";
 //static u_char ngx_not_connected_string[] = "Could not connect to aersopike!";
 
-static ngx_command_t ngx_http_connect_aerospike_commands[] = {
+static ngx_command_t ngx_http_variable_life_commands[] = {
 	{
-		ngx_string("connect_aerospike"),
+		ngx_string("variable_life"),
 		NGX_HTTP_LOC_CONF|NGX_CONF_NOARGS,
-		ngx_http_connect_aerospike,
+		ngx_http_variable_life,
 		0,
 		0,
 		NULL
@@ -59,7 +59,7 @@ static ngx_command_t ngx_http_connect_aerospike_commands[] = {
 	ngx_null_command
 };
 
-static ngx_http_module_t ngx_http_connect_aerospike_module_ctx = {
+static ngx_http_module_t ngx_http_variable_life_module_ctx = {
 	NULL,
 	NULL,
 
@@ -69,14 +69,14 @@ static ngx_http_module_t ngx_http_connect_aerospike_module_ctx = {
 	NULL,
 	NULL,
 
-	ngx_http_connect_aerospike_create_loc_conf,
-	ngx_http_connect_aerospike_merge_loc_conf
+	ngx_http_variable_life_create_loc_conf,
+	ngx_http_variable_life_merge_loc_conf
 };
 
-ngx_module_t ngx_http_connect_aerospike_module = {
+ngx_module_t ngx_http_variable_life_module = {
 	NGX_MODULE_V1,
-	&ngx_http_connect_aerospike_module_ctx,
-	ngx_http_connect_aerospike_commands,
+	&ngx_http_variable_life_module_ctx,
+	ngx_http_variable_life_commands,
 	NGX_HTTP_MODULE,
 	NULL,
 	NULL,
@@ -88,10 +88,10 @@ ngx_module_t ngx_http_connect_aerospike_module = {
 	NGX_MODULE_V1_PADDING
 };
 
-static void* ngx_http_connect_aerospike_create_loc_conf(ngx_conf_t *cf)
+static void* ngx_http_variable_life_create_loc_conf(ngx_conf_t *cf)
 {
-	ngx_http_connect_aerospike_loc_conf_t *conf;
-	conf = ngx_pcalloc(cf->pool, sizeof(ngx_http_connect_aerospike_loc_conf_t));
+	ngx_http_variable_life_loc_conf_t *conf;
+	conf = ngx_pcalloc(cf->pool, sizeof(ngx_http_variable_life_loc_conf_t));
 
 	if(conf==NULL)
 		return NGX_CONF_ERROR;
@@ -115,16 +115,16 @@ static void* ngx_http_connect_aerospike_create_loc_conf(ngx_conf_t *cf)
 
 }
 
-static char* ngx_http_connect_aerospike_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
+static char* ngx_http_variable_life_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
 {
-	ngx_http_connect_aerospike_loc_conf_t *prev = parent;
-	ngx_http_connect_aerospike_loc_conf_t *conf = child;
+	ngx_http_variable_life_loc_conf_t *prev = parent;
+	ngx_http_variable_life_loc_conf_t *conf = child;
 
 	ngx_conf_merge_uint_value(conf->here, prev->here, 0);
 	return NGX_CONF_OK;
 }
 
-static ngx_int_t ngx_http_connect_aerospike_handler(ngx_http_request_t *r)
+static ngx_int_t ngx_http_variable_life_handler(ngx_http_request_t *r)
 {
 	ngx_int_t rc;
 	ngx_buf_t *b;
@@ -146,8 +146,8 @@ static ngx_int_t ngx_http_connect_aerospike_handler(ngx_http_request_t *r)
 	out.buf = b;
 	out.next = NULL;
 
-	ngx_http_connect_aerospike_loc_conf_t *cglcf;
-	cglcf = ngx_http_get_module_loc_conf(r, ngx_http_connect_aerospike_module);
+	ngx_http_variable_life_loc_conf_t *cglcf;
+	cglcf = ngx_http_get_module_loc_conf(r, ngx_http_variable_life_module);
 
 	cglcf->here = cglcf->here + 1;
 
@@ -193,10 +193,10 @@ static ngx_int_t ngx_http_connect_aerospike_handler(ngx_http_request_t *r)
 	return ngx_http_output_filter(r, &out);
 }
 
-static char* ngx_http_connect_aerospike(ngx_conf_t *cf, ngx_command_t *cmd, void* conf)
+static char* ngx_http_variable_life(ngx_conf_t *cf, ngx_command_t *cmd, void* conf)
 {
 	ngx_http_core_loc_conf_t *clcf;
 	clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
-	clcf->handler = ngx_http_connect_aerospike_handler;
+	clcf->handler = ngx_http_variable_life_handler;
 	return NGX_CONF_OK;
 }
