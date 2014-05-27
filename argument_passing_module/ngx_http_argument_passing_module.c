@@ -86,8 +86,6 @@ static ngx_int_t ngx_http_argument_passing_handler(ngx_http_request_t *r)
 	out.buf = b;
 	out.next = NULL;
 
-	//ngx_http_argument_passing_conf_t *cglcf;
-	//cglcf = ngx_http_get_module_srv_conf(r, ngx_http_argument_passing_module);
 
 	b->pos = first.data;
 	b->last = first.data + first.len;
@@ -95,9 +93,6 @@ static ngx_int_t ngx_http_argument_passing_handler(ngx_http_request_t *r)
 	b->memory = 1;
 	b->last_buf = 1;
 
-	char output[1024];
-	sprintf(output, "Inside First=%s, Last=%s", first.data, last.data);
-	ngx_write_stderr(output);
 
 	r->headers_out.status = NGX_HTTP_OK;
 	r->headers_out.content_length_n = first.len;
@@ -115,24 +110,13 @@ static char* ngx_http_argument_passing(ngx_conf_t *cf, ngx_command_t *cmd, void 
 	clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
 	clcf->handler = ngx_http_argument_passing_handler;
 
-	u_char *values = (u_char*)cf->args->elts;
-	u_char* f = &values[0];
-	u_char* l = &values[1];
+	ngx_str_t *values = cf->args->elts;
 
-	/*first.data = f->data;
+	first.data = values[1].data;
 	first.len = ngx_strlen(first.data);
 
-	last.data = l->data;
-	last.len = ngx_strlen(last.data);*/
-
-	first.data = f;
-	first.len = ngx_strlen(first.data);
-
-	last.data = l;
+	last.data = values[2].data;
 	last.len = ngx_strlen(last.data);
 
-	char output[1024];
-	sprintf(output, "First=%s, Last=%s\n", first.data, last.data);
-	ngx_write_stderr(output);
 	return NGX_CONF_OK;
 }
