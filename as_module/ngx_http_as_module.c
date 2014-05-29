@@ -51,9 +51,9 @@ static void* ngx_http_as_module_create_srv_conf(ngx_conf_t *cf);
 static char* ngx_http_as_connect(ngx_conf_t *cf, ngx_command_t *cmd, void* conf);
 static char*ngx_http_as_connected(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 
-bool ngx_http_aerospike_connect(aerospike *as, ngx_http_as_hosts hosts);
-void ngx_http_create_as_config(as_config *cfg, ngx_http_as_hosts hosts);
-void ngx_http_get_as_hosts(char *arg, ngx_http_as_hosts *hosts);
+bool ngx_http_as_utils_connect(aerospike *as, ngx_http_as_hosts hosts);
+void ngx_http_as_utils_create_config(as_config *cfg, ngx_http_as_hosts hosts);
+void ngx_http_as_utils_get_hosts(char *arg, ngx_http_as_hosts *hosts);
 
 static ngx_command_t ngx_http_as_commands[] = {
 	{
@@ -145,10 +145,10 @@ static char* ngx_http_as_connect(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
 	// parsing different hosts from the argument.
 	ngx_http_as_hosts hosts;
-	ngx_http_get_as_hosts((char*)host.data, &hosts);
+	ngx_http_as_utils_get_hosts((char*)host.data, &hosts);
 
 	// connecting to aerospike.
-	if(ngx_http_aerospike_connect(&(as_conf->as), hosts))
+	if(ngx_http_as_utils_connect(&(as_conf->as), hosts))
 	{
 		as_conf->connected = true;
 	}
@@ -222,14 +222,14 @@ static char* ngx_http_as_connected(ngx_conf_t *cf, ngx_command_t *cmd, void *con
  * It then created the connected to the cluster.
  * If the connection is succesful, it returns true, else false.
  */
-bool ngx_http_aerospike_connect(aerospike *as, ngx_http_as_hosts hosts)
+bool ngx_http_as_utils_connect(aerospike *as, ngx_http_as_hosts hosts)
 {
 	// creating and initialising the as_config object.
 	as_config cfg;
 	as_config_init(&cfg);
 
 	// adding the multiple ip and ports to the as_config object.
-	ngx_http_create_as_config(&cfg, hosts);
+	ngx_http_as_utils_create_config(&cfg, hosts);
 
 	// connecting to aerospike.
 	aerospike_init(as, &cfg);
@@ -241,7 +241,7 @@ bool ngx_http_aerospike_connect(aerospike *as, ngx_http_as_hosts hosts)
 }
 
 /* This function adds the different ip and ports, to the as_config object.*/
-void ngx_http_create_as_config(as_config *cfg, ngx_http_as_hosts hosts)
+void ngx_http_as_utils_create_config(as_config *cfg, ngx_http_as_hosts hosts)
 {
 	int i;
 	for(i=0; i<hosts.n; i++)
@@ -254,7 +254,7 @@ void ngx_http_create_as_config(as_config *cfg, ngx_http_as_hosts hosts)
 /*This function takes as argument a character array of ip ports separeated by ";" which in turn are separated by ",".
  * It parses them into individual host ips and ports.
  */
-void ngx_http_get_as_hosts(char *arg, ngx_http_as_hosts *hosts)
+void ngx_http_as_utils_get_hosts(char *arg, ngx_http_as_hosts *hosts)
 {
 	// temp_hosts stores the string combinations of host ip and port, merged using a semicolon.
 	// for eg, 127.0.0.1:3000
