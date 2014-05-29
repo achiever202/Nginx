@@ -35,7 +35,15 @@ typedef struct
 	bool connected;
 }ngx_http_as_conf_t;
 
-static ngx_str_t host_ip, host_port;
+typedef struct
+{
+	int n;
+	char address[256][16];
+	int port[256];
+	char *mystring;
+}ngx_http_as_hosts;
+
+static ngx_str_t host;
 static u_char connected[] = "Connected to aerospike!";
 static u_char not_connected[] = "Not connected to aerospike!";
 
@@ -43,10 +51,14 @@ static void* ngx_http_as_module_create_srv_conf(ngx_conf_t *cf);
 static char* ngx_http_as_connect(ngx_conf_t *cf, ngx_command_t *cmd, void* conf);
 static char*ngx_http_as_connected(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 
+bool ngx_http_aerospike_connect(aerospike *as, ngx_http_as_hosts hosts);
+void ngx_http_create_as_config(as_config *cfg, ngx_http_as_hosts hosts);
+void ngx_http_get_as_hosts(char *arg, ngx_http_as_hosts *hosts);
+
 static ngx_command_t ngx_http_as_commands[] = {
 	{
 		ngx_string("as_connect"),
-		NGX_HTTP_LOC_CONF|NGX_HTTP_SRV_CONF|NGX_CONF_TAKE3,
+		NGX_HTTP_LOC_CONF|NGX_HTTP_SRV_CONF|NGX_CONF_TAKE1,
 		ngx_http_as_connect,
 		0,
 		0,
@@ -123,29 +135,20 @@ static char* ngx_http_as_connect(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 	// Dereferencing the arguments array from void* to ngx_str_t*.
 	ngx_str_t *arguments = cf->args->elts;
 
-	// Stroing the ip in host_ip.
-	host_ip.data = arguments[1].data;
-	host_ip.len = ngx_strlen(host_ip.data);
+	// stroing the argument passed in an ngx_str_t variable
+	host.data = arguments[1].data;
+	host.len = ngx_strlen(host.data);
 
-	// Stroing the port in host_port.
-	host_port.data = arguments[2].data;
-	host_ip.len = ngx_strlen(host_port.data);
-
+	// accessing the server configuration.
 	ngx_http_as_conf_t *as_conf;
-
 	as_conf = ngx_http_conf_get_module_srv_conf(cf, ngx_http_as_module);
-	as_config cfg;
 
-	as_config_init(&cfg);
+	// parsing different hosts from the argument.
+	ngx_http_as_hosts hosts;
+	ngx_http_get_as_hosts((char*)host.data, &hosts);
 
-	cfg.hosts[0].addr = (char*)host_ip.data;
-	cfg.hosts[0].port = atoi((char*)host_port.data);
-
-	aerospike_init(&(as_conf->as), &cfg);
-
-	as_error err;
-
-	if(aerospike_connect(&(as_conf->as), &err)==AEROSPIKE_OK)
+	// connecting to aerospike.
+	if(ngx_http_aerospike_connect(&(as_conf->as), hosts))
 	{
 		as_conf->connected = true;
 	}
@@ -213,4 +216,74 @@ static char* ngx_http_as_connected(ngx_conf_t *cf, ngx_command_t *cmd, void *con
 		clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
 		clcf->handler = ngx_http_as_connected_handler;
 		return NGX_CONF_OK;
+}
+
+/* This function accepts an aerospike object, and the hosts to be connected.
+ * It then created the connected to the cluster.
+ * If the connection is succesful, it returns true, else false.
+ */
+bool ngx_http_aerospike_connect(aerospike *as, ngx_http_as_hosts hosts)
+{
+	// creating and initialising the as_config object.
+	as_config cfg;
+	as_config_init(&cfg);
+
+	// adding the multiple ip and ports to the as_config object.
+	ngx_http_create_as_config(&cfg, hosts);
+
+	// connecting to aerospike.
+	aerospike_init(as, &cfg);
+	as_error err;
+	if(aerospike_connect(as, &err)!=AEROSPIKE_OK)
+		return false;
+
+	return true;
+}
+
+/* This function adds the different ip and ports, to the as_config object.*/
+void ngx_http_create_as_config(as_config *cfg, ngx_http_as_hosts hosts)
+{
+	int i;
+	for(i=0; i<hosts.n; i++)
+	{
+		cfg->hosts[i].addr = hosts.address[i];
+		cfg->hosts[i].port = hosts.port[i];
+	}
+}
+
+/*This function takes as argument a character array of ip ports separeated by ";" which in turn are separated by ",".
+ * It parses them into individual host ips and ports.
+ */
+void ngx_http_get_as_hosts(char *arg, ngx_http_as_hosts *hosts)
+{
+	// temp_hosts stores the string combinations of host ip and port, merged using a semicolon.
+	// for eg, 127.0.0.1:3000
+	char temp_hosts[256][30];
+
+	// pos stores the number of host ip and ports obtained. Set to 0.
+	int pos = 0, i;
+
+	// splitting up the different hosts, separated using ",".
+	char *temp = strtok(arg, ",");
+	while(temp!=NULL)
+	{
+		// copying the current host ip and port string into the temp_host array.
+		strcpy(temp_hosts[pos], temp);
+		pos++;
+
+		temp = strtok(NULL, ",");
+	}
+
+	// setting the number of hosts as the value obtained above.
+	hosts->n = pos;
+
+	// For each host, separating the address and port.
+	for(i=0; i<pos; i++)
+	{
+		temp = strtok(temp_hosts[i], ":");
+		strcpy(hosts->address[i], temp);
+
+		temp = strtok(NULL, ":");
+		hosts->port[i] = atoi(temp);
+	}
 }
