@@ -31,16 +31,22 @@
 
 typedef struct
 {
-	aerospike as;
+	aerospike *as;
 	bool connected;
-}ngx_http_as_conf_t;
+}ngx_http_as_srv_conf_t;
+
+typedef struct
+{
+	aerospike *as;
+	bool connected;
+	bool is_server_copied;
+}ngx_http_as_loc_conf_t;
 
 typedef struct
 {
 	int n;
 	char address[256][16];
 	int port[256];
-	char *mystring;
 }ngx_http_as_hosts;
 
 static ngx_str_t host;
@@ -48,6 +54,8 @@ static u_char connected[] = "Connected to aerospike!";
 static u_char not_connected[] = "Not connected to aerospike!";
 
 static void* ngx_http_as_module_create_srv_conf(ngx_conf_t *cf);
+static void* ngx_http_as_module_create_loc_conf(ngx_conf_t *cf);
+static char* ngx_http_as_module_merge_loc_conf(ngx_conf_t *cf, void* parent, void* child);
 static char* ngx_http_as_connect(ngx_conf_t *cf, ngx_command_t *cmd, void* conf);
 static char*ngx_http_as_connected(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 
@@ -87,8 +95,8 @@ ngx_http_module_t ngx_http_as_module_ctx = {
 	ngx_http_as_module_create_srv_conf,
 	NULL,
 
-	NULL,
-	NULL
+	ngx_http_as_module_create_loc_conf,
+	ngx_http_as_module_merge_loc_conf
 };
 
 ngx_module_t ngx_http_as_module = {
@@ -108,22 +116,64 @@ ngx_module_t ngx_http_as_module = {
 
 /* This function creates the server configuration of the aersopike moodules.
  * It allocates memory for the ngx_http_as_conf_t structre.
- * Also, it sets the flags for all the 32 cluster objects as false, signifying that there are no cluster objects initialized.
  */
 static void* ngx_http_as_module_create_srv_conf(ngx_conf_t *cf)
 {
+
 	// The configuration pointer to the structure.
-	ngx_http_as_conf_t *conf;
+	ngx_http_as_srv_conf_t *conf;
 
 	// Allocating memory using the default nginx function pcalloc.
 	// It takes care of deallocating memory later.
-	conf = ngx_pcalloc(cf->pool, sizeof(ngx_http_as_conf_t));
+	conf = ngx_pcalloc(cf->pool, sizeof(ngx_http_as_srv_conf_t));
 
 	// Setting all the flag variables for the cluster objects to false.
 	// No cluster objects initialised.
+	conf->as = NULL;
 	conf->connected = false;
 
 	return conf;
+}
+
+/* This function creates the location configuration for the module.
+ * It allocates memory for the nngx_http_as_loc_conf_t object for the location.
+ */
+static void* ngx_http_as_module_create_loc_conf(ngx_conf_t *cf)
+{
+	// creating a location object and allocating memory.
+	ngx_http_as_loc_conf_t *conf;
+	conf = ngx_pcalloc(cf->pool, sizeof(ngx_http_as_loc_conf_t));
+
+	// setting default values.
+	conf->as = NULL;
+	conf->connected = false;
+	conf->is_server_copied = false;
+
+	return conf;
+}
+
+/* This function merges the server and location configurations.
+ * If the location object is already initialised, it does nothing.
+ * If the object is not initialised, it copies the server configuration and sets the flags.
+ */
+static char* ngx_http_as_module_merge_loc_conf(ngx_conf_t *cf, void* parent, void* child)
+{
+	// server context object.
+	ngx_http_as_srv_conf_t *previous = parent;
+
+	// location context object.
+	ngx_http_as_loc_conf_t *conf = child;
+
+	// If the location object is not initialised, copy the server configuration.
+	if(conf->as==NULL)
+	{
+		conf->as = previous->as;
+		conf->connected = previous->connected;
+		conf->is_server_copied = true;
+
+	}
+	
+	return NGX_CONF_OK;
 }
 
 /* This function is called when the command as_connect is called.
@@ -139,18 +189,32 @@ static char* ngx_http_as_connect(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 	host.data = arguments[1].data;
 	host.len = ngx_strlen(host.data);
 
-	// accessing the server configuration.
-	ngx_http_as_conf_t *as_conf;
-	as_conf = ngx_http_conf_get_module_srv_conf(cf, ngx_http_as_module);
-
 	// parsing different hosts from the argument.
 	ngx_http_as_hosts hosts;
 	ngx_http_as_utils_get_hosts((char*)host.data, &hosts);
 
-	// connecting to aerospike.
-	if(ngx_http_as_utils_connect(&(as_conf->as), hosts))
+	if(cf->cmd_type==NGX_HTTP_SRV_CONF)
 	{
-		as_conf->connected = true;
+		ngx_http_as_srv_conf_t *as_conf;
+		as_conf = ngx_http_conf_get_module_srv_conf(cf, ngx_http_as_module);
+
+		as_conf->as = ngx_pcalloc(cf->pool, sizeof(aerospike));
+		if(ngx_http_as_utils_connect(as_conf->as, hosts))
+		{
+			as_conf->connected = true;
+		}
+	}
+	else
+	{
+		ngx_http_as_loc_conf_t *as_conf;
+		as_conf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_as_module);
+		
+		as_conf->as = ngx_pcalloc(cf->pool, sizeof(aerospike));
+		if(ngx_http_as_utils_connect(as_conf->as, hosts))
+		{
+			as_conf->connected = true;
+		}
+		as_conf->is_server_copied = false;
 	}
 
 	return NGX_CONF_OK;
@@ -162,8 +226,8 @@ static ngx_int_t ngx_http_as_connected_handler(ngx_http_request_t *r)
 	ngx_buf_t *b;
 	ngx_chain_t out;
 
-	ngx_http_as_conf_t *as_conf;
-	as_conf = ngx_http_get_module_srv_conf(r, ngx_http_as_module);
+	ngx_http_as_loc_conf_t *as_conf;
+	as_conf = ngx_http_get_module_loc_conf(r, ngx_http_as_module);
 
 	rc = ngx_http_discard_request_body(r);
 
