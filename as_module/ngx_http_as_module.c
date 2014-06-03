@@ -257,7 +257,7 @@ static ngx_int_t ngx_http_as_connected_handler(ngx_http_request_t *r)
 	else
 	{
 		b->pos = not_connected;
-		b->last = connected + sizeof(not_connected) - 1;
+		b->last = not_connected + sizeof(not_connected) - 1;
 
 		r->headers_out.content_length_n = sizeof(not_connected)-1;
 	}
