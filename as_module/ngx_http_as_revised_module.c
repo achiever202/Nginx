@@ -38,6 +38,8 @@ typedef struct
 	aerospike *as;
 	ngx_str_t default_hosts;
 	bool connected;
+	ngx_pool_t *pool;
+
 }ngx_http_as_srv_conf_t;
 
 typedef struct
@@ -46,6 +48,7 @@ typedef struct
 	ngx_str_t default_hosts;
 	bool connected;
 	bool use_server_conf;
+	ngx_pool_t *pool;
 }ngx_http_as_loc_conf_t;
 
 typedef struct
@@ -69,7 +72,7 @@ static char* ngx_http_as_connect(ngx_conf_t *cf, ngx_command_t *cmd, void* conf)
 static char*ngx_http_as_connected(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 static char* ngx_http_as_use_srv_conf(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 
-bool ngx_http_as_utils_connect(ngx_http_request_t *r, aerospike *as, ngx_http_as_hosts hosts);
+bool ngx_http_as_utils_connect(aerospike **as, ngx_http_as_hosts hosts);
 void ngx_http_as_utils_create_config(as_config *cfg, ngx_http_as_hosts hosts);
 void ngx_http_as_utils_get_hosts(char *arg, ngx_http_as_hosts *hosts);
 void ngx_http_as_utils_get_parsed_url_arguement(ngx_str_t url, char *arg, char value[]);
@@ -151,6 +154,7 @@ static void* ngx_http_as_module_create_srv_conf(ngx_conf_t *cf)
 	// No cluster objects initialised.
 	conf->as = NULL;
 	conf->connected = false;
+	conf->pool = cf->pool;
 
 	return conf;
 }
@@ -168,6 +172,7 @@ static void* ngx_http_as_module_create_loc_conf(ngx_conf_t *cf)
 	conf->as = NULL;
 	conf->connected = false;
 	conf->use_server_conf = false;
+	conf->pool = cf->pool;
 
 	return conf;
 }
@@ -234,7 +239,7 @@ static ngx_int_t ngx_http_as_connect_handler(ngx_http_request_t *r)
 			}
 			
 			// connecting to new configurations.
-			if(ngx_http_as_utils_connect(r, as_srv_conf->as, hosts))
+			if(ngx_http_as_utils_connect(&(as_srv_conf->as), hosts))
 			{
 				as_srv_conf->connected = true;
 
@@ -258,7 +263,7 @@ static ngx_int_t ngx_http_as_connect_handler(ngx_http_request_t *r)
 			if(!as_srv_conf->connected)
 			{
 				ngx_http_as_utils_get_hosts((char*)as_srv_conf->default_hosts.data, &hosts);
-				if(ngx_http_as_utils_connect(r, as_srv_conf->as, hosts))
+				if(ngx_http_as_utils_connect(&(as_srv_conf->as), hosts))
 				{
 					as_srv_conf->connected = true;
 
@@ -302,7 +307,7 @@ static ngx_int_t ngx_http_as_connect_handler(ngx_http_request_t *r)
 			}
 			
 			// connecting with the new configurations.
-			if(ngx_http_as_utils_connect(r, as_loc_conf->as, hosts))
+			if(ngx_http_as_utils_connect(&(as_loc_conf->as), hosts))
 			{
 				as_loc_conf->connected = true;
 
@@ -326,7 +331,7 @@ static ngx_int_t ngx_http_as_connect_handler(ngx_http_request_t *r)
 			if(!as_loc_conf->connected)
 			{
 				ngx_http_as_utils_get_hosts((char*)as_loc_conf->default_hosts.data, &hosts);
-				if(ngx_http_as_utils_connect(r, as_loc_conf->as, hosts))
+				if(ngx_http_as_utils_connect(&(as_loc_conf->as), hosts))
 				{
 					as_loc_conf->connected = true;
 
@@ -468,7 +473,7 @@ static char* ngx_http_as_connected(ngx_conf_t *cf, ngx_command_t *cmd, void *con
  * It then created the connected to the cluster.
  * If the connection is succesful, it returns true, else false.
  */
-bool ngx_http_as_utils_connect(ngx_http_request_t *r, aerospike *as, ngx_http_as_hosts hosts)
+bool ngx_http_as_utils_connect(aerospike **as, ngx_http_as_hosts hosts)
 {
 	// creating and initialising the as_config object.
 	as_config cfg;
@@ -478,10 +483,9 @@ bool ngx_http_as_utils_connect(ngx_http_request_t *r, aerospike *as, ngx_http_as
 	ngx_http_as_utils_create_config(&cfg, hosts);
 
 	// connecting to aerospike.
-	as = ngx_pcalloc(r->pool, sizeof(aerospike));
-	aerospike_init(as, &cfg);
+	*as = aerospike_new(&cfg);
 	as_error err;
-	if(aerospike_connect(as, &err)!=AEROSPIKE_OK)
+	if(aerospike_connect(*as, &err)!=AEROSPIKE_OK)
 		return false;
 
 	return true;
