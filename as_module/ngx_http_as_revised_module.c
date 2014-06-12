@@ -36,6 +36,18 @@
 typedef struct
 {
 	aerospike *as;
+
+	ngx_str_t default_hosts;
+	
+	bool connected;
+	bool use_server_conf;
+	
+	ngx_pool_t *pool;
+}ngx_http_as_conf_t;
+
+/*typedef struct
+{
+	aerospike *as;
 	ngx_str_t default_hosts;
 	bool connected;
 	ngx_pool_t *pool;
@@ -49,7 +61,7 @@ typedef struct
 	bool connected;
 	bool use_server_conf;
 	ngx_pool_t *pool;
-}ngx_http_as_loc_conf_t;
+}ngx_http_as_loc_conf_t;*/
 
 typedef struct
 {
@@ -58,8 +70,8 @@ typedef struct
 	int port[256];
 }ngx_http_as_hosts;
 
-static u_char connected[] = "Connected to aerospike!";
-static u_char not_connected[] = "Not connected to aerospike!";
+//static u_char connected[] = "Connected to aerospike!";
+//static u_char not_connected[] = "Not connected to aerospike!";
 static u_char connected_server[] = "Connected to server configuration!";
 static u_char not_connected_server[] = "Could not connect to server configuration!";
 static u_char connected_local[] = "Connected to local configuration!";
@@ -69,7 +81,7 @@ static u_char not_connected_local[] = "Could not connect to local configuration!
 static void* ngx_http_as_module_create_srv_conf(ngx_conf_t *cf);
 static void* ngx_http_as_module_create_loc_conf(ngx_conf_t *cf);
 static char* ngx_http_as_connect(ngx_conf_t *cf, ngx_command_t *cmd, void* conf);
-static char*ngx_http_as_connected(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+//static char*ngx_http_as_connected(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 static char* ngx_http_as_use_srv_conf(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 
 bool ngx_http_as_utils_connect(aerospike **as, ngx_http_as_hosts hosts);
@@ -96,14 +108,14 @@ static ngx_command_t ngx_http_as_commands[] = {
 		NULL
 	},
 
-	{
+	/*{
 		ngx_string("as_connected"),
 		NGX_HTTP_LOC_CONF|NGX_HTTP_SRV_CONF|NGX_CONF_NOARGS,
 		ngx_http_as_connected,
 		0,
 		0,
 		NULL
-	},
+	},*/
 
 	ngx_null_command
 };
@@ -144,16 +156,17 @@ static void* ngx_http_as_module_create_srv_conf(ngx_conf_t *cf)
 {
 
 	// The configuration pointer to the structure.
-	ngx_http_as_srv_conf_t *conf;
+	ngx_http_as_conf_t *conf;
 
 	// Allocating memory using the default nginx function pcalloc.
 	// It takes care of deallocating memory later.
-	conf = ngx_pcalloc(cf->pool, sizeof(ngx_http_as_srv_conf_t));
+	conf = ngx_pcalloc(cf->pool, sizeof(ngx_http_as_conf_t));
 
 	// Setting all the flag variables for the cluster objects to false.
 	// No cluster objects initialised.
 	conf->as = NULL;
 	conf->connected = false;
+	conf->use_server_conf = true;
 	conf->pool = cf->pool;
 
 	return conf;
@@ -165,8 +178,8 @@ static void* ngx_http_as_module_create_srv_conf(ngx_conf_t *cf)
 static void* ngx_http_as_module_create_loc_conf(ngx_conf_t *cf)
 {
 	// creating a location object and allocating memory.
-	ngx_http_as_loc_conf_t *conf;
-	conf = ngx_pcalloc(cf->pool, sizeof(ngx_http_as_loc_conf_t));
+	ngx_http_as_conf_t *conf;
+	conf = ngx_pcalloc(cf->pool, sizeof(ngx_http_as_conf_t));
 
 	// setting default values.
 	conf->as = NULL;
@@ -179,9 +192,16 @@ static void* ngx_http_as_module_create_loc_conf(ngx_conf_t *cf)
 
 static ngx_int_t ngx_http_as_connect_handler(ngx_http_request_t *r)
 {
-	// varaibles to hold the server and location configurations.
-	ngx_http_as_srv_conf_t *as_srv_conf;
-	ngx_http_as_loc_conf_t *as_loc_conf;
+	ngx_http_as_conf_t *as_conf;
+	bool connection_made = false;
+	bool using_server_configuration = false;
+
+	as_conf = ngx_http_get_module_loc_conf(r, ngx_http_as_module);
+	if(as_conf->use_server_conf)
+	{
+		using_server_configuration = true;
+		as_conf = ngx_http_get_module_srv_conf(r, ngx_http_as_module);
+	}
 
 	// hosts stores the hosts address and ports to iniitailise the cluster object with.
 	// hosts_arrived_in_url checks whether the request contains the ip and ports.
@@ -192,10 +212,6 @@ static ngx_int_t ngx_http_as_connect_handler(ngx_http_request_t *r)
 	ngx_int_t rc;
 	ngx_buf_t *b;
 	ngx_chain_t out;
-
-	// accessing the server and location configurations.
-	as_srv_conf = ngx_http_get_module_srv_conf(r, ngx_http_as_module);
-	as_loc_conf = ngx_http_get_module_loc_conf(r, ngx_http_as_module);
 
 	// setting the reply headers.
 	r->headers_out.content_type_len = sizeof("text/html")-1;
@@ -222,140 +238,68 @@ static ngx_int_t ngx_http_as_connect_handler(ngx_http_request_t *r)
 		ngx_http_as_utils_get_hosts(hosts_string, &hosts);
 	}
 
-	// if using the server configuration.
-	if(as_loc_conf->use_server_conf)
-	{	
-		// if hosts arrived in url, we need to connect to that addresses.
-		if(hosts_arrived_in_url)
+	// if hosts arrived in url, we need to connect to that addresses.
+	if(hosts_arrived_in_url)
+	{
+		// if the object is previously connected, closing the connection.
+		if(as_conf->connected)
 		{
-			// if the object is previously connected, closing the connection.
-			if(as_srv_conf->connected)
-			{
-				as_error err;
-				aerospike_close(as_srv_conf->as, &err);
-				aerospike_destroy(as_srv_conf->as);
+			as_error err;
+			aerospike_close(as_conf->as, &err);
+			aerospike_destroy(as_conf->as);
 
-				as_srv_conf->connected = false;
-			}
+			as_conf->connected = false;
+		}
 			
-			// connecting to new configurations.
-			if(ngx_http_as_utils_connect(&(as_srv_conf->as), hosts))
+		// connecting to new configurations.
+		if(ngx_http_as_utils_connect(&(as_conf->as), hosts))
+		{
+			as_conf->connected = true;
+			connection_made = true;
+		}
+	}
+	else
+	{
+		// if using the default server hosts.
+		// if the object is not yet connected, we need to initialize.
+		if(!as_conf->connected)
+		{
+			ngx_http_as_utils_get_hosts((char*)as_conf->default_hosts.data, &hosts);
+			if(ngx_http_as_utils_connect(&(as_conf->as), hosts))
 			{
-				as_srv_conf->connected = true;
-
-				// setting the reply string.
-				b->pos = connected_server;
-				b->last = connected_server + sizeof(connected_server) - 1;
-				r->headers_out.content_length_n = sizeof(connected_server)-1;
-			}
-			else
-			{
-				// setting the reply string.
-				b->pos = not_connected_server;
-				b->last = not_connected_server + sizeof(not_connected_server) - 1;
-				r->headers_out.content_length_n = sizeof(not_connected_server)-1;	
+				as_conf->connected = true;
+				connection_made = true;
 			}
 		}
 		else
 		{
-			// if using the default server hosts.
-			// if the object is not yet connected, we need to initialize.
-			if(!as_srv_conf->connected)
-			{
-				ngx_http_as_utils_get_hosts((char*)as_srv_conf->default_hosts.data, &hosts);
-				if(ngx_http_as_utils_connect(&(as_srv_conf->as), hosts))
-				{
-					as_srv_conf->connected = true;
-
-					// setting the reply string.
-					b->pos = connected_server;
-					b->last = connected_server + sizeof(connected_server) - 1;
-					r->headers_out.content_length_n = sizeof(connected_server)-1;
-				}
-				else
-				{
-					// setting the reply string.
-					b->pos = not_connected_server;
-					b->last = not_connected_server + sizeof(not_connected_server) - 1;
-					r->headers_out.content_length_n = sizeof(not_connected_server)-1;		
-				}
-			}
-			else
-			{
-				// setting the reply string.
-				b->pos = connected_server;
-				b->last = connected_server + sizeof(connected_server) - 1;
-				r->headers_out.content_length_n = sizeof(connected_server)-1;	
-			}
+			connection_made = true;
 		}
 	}
 
-	// if using the server configuration.
+	if(using_server_configuration && connection_made)
+	{
+		b->pos = connected_server;
+		b->last = connected_server + sizeof(connected_server) - 1;
+		r->headers_out.content_length_n = sizeof(connected_server) - 1;
+	}
+	else if(using_server_configuration)
+	{
+		b->pos = not_connected_server;
+		b->last = not_connected_server + sizeof(not_connected_server) - 1;
+		r->headers_out.content_length_n = sizeof(not_connected_server) - 1;
+	}
+	else if(connection_made)
+	{
+		b->pos = connected_local;
+		b->last = connected_local + sizeof(connected_local) - 1;
+		r->headers_out.content_length_n = sizeof(connected_local) - 1;
+	}
 	else
 	{
-		// if url contains the ip and ports.
-		if(hosts_arrived_in_url)
-		{
-			// if the local object is previously connected, we need to close the connection.
-			if(as_loc_conf->connected)
-			{
-				as_error err;
-				aerospike_close(as_loc_conf->as, &err);
-				aerospike_destroy(as_loc_conf->as);
-
-				as_loc_conf->connected = false;
-			}
-			
-			// connecting with the new configurations.
-			if(ngx_http_as_utils_connect(&(as_loc_conf->as), hosts))
-			{
-				as_loc_conf->connected = true;
-
-				// setting the reply string.
-				b->pos = connected_local;
-				b->last = connected_local + sizeof(connected_local) - 1;
-				r->headers_out.content_length_n = sizeof(connected_local)-1;
-			}
-			else
-			{
-				// setting the reply string.
-				b->pos = not_connected_local;
-				b->last = not_connected_local + sizeof(not_connected_local) - 1;
-				r->headers_out.content_length_n = sizeof(not_connected_local)-1;	
-			}
-		}
-		else
-		{
-			// if using the default local hosts.
-			// if the local object is not previously connected, we need to initialize it.
-			if(!as_loc_conf->connected)
-			{
-				ngx_http_as_utils_get_hosts((char*)as_loc_conf->default_hosts.data, &hosts);
-				if(ngx_http_as_utils_connect(&(as_loc_conf->as), hosts))
-				{
-					as_loc_conf->connected = true;
-
-					// setting the reply string.
-					b->pos = connected_local;
-					b->last = connected_local + sizeof(connected_local) - 1;
-					r->headers_out.content_length_n = sizeof(connected_local)-1;
-				}
-				else
-				{
-					// setting the reply string.
-					b->pos = not_connected_local;
-					b->last = not_connected_local + sizeof(not_connected_local) - 1;
-					r->headers_out.content_length_n = sizeof(not_connected_local)-1;
-				}
-			}
-			else
-			{
-				// setting the reply string.
-				b->pos = connected_local;
-				b->last = connected_local + sizeof(connected_local) - 1;
-				r->headers_out.content_length_n = sizeof(connected_local)-1;
-			}
-		}
+		b->pos = not_connected_local;
+		b->last = not_connected_local + sizeof(not_connected_local) - 1;
+		r->headers_out.content_length_n = sizeof(not_connected_local) - 1;
 	}
 
 	// sending back the reply.
@@ -371,42 +315,45 @@ static ngx_int_t ngx_http_as_connect_handler(ngx_http_request_t *r)
 	return ngx_http_output_filter(r, &out);
 }
 
+/* This function sets up the as_connect directive.
+ * It takes one arguements, which is the default hosts string, of the form, 127.0.0.1:3000,127.0.0.1:4000
+ */
 static char* ngx_http_as_connect(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
+	// Storing the arguemnts of the directive.
 	ngx_str_t *arguments = cf->args->elts;
 
+	// Accesing the core configuration and setting up the handler.
 	ngx_http_core_loc_conf_t *clcf;
 	clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
 	clcf->handler = ngx_http_as_connect_handler;
 
+	// Acessing the server/local configuration.
+	ngx_http_as_conf_t *as_conf;
+
+	// Checking for the context, i.e. server/local.
 	if(cf->cmd_type==NGX_HTTP_SRV_CONF)
-	{
-		ngx_http_as_srv_conf_t *as_srv_conf;
-		as_srv_conf = ngx_http_conf_get_module_srv_conf(cf, ngx_http_as_module);
-
-		as_srv_conf->default_hosts.data = arguments[1].data;
-		as_srv_conf->default_hosts.len = ngx_strlen(as_srv_conf->default_hosts.data);
-	}
+		as_conf = ngx_http_conf_get_module_srv_conf(cf, ngx_http_as_module);
 	else
-	{
-		ngx_http_as_loc_conf_t *as_loc_conf;
-		as_loc_conf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_as_module);
+		as_conf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_as_module);
 
-		as_loc_conf->default_hosts.data = arguments[1].data;
-		as_loc_conf->default_hosts.len = ngx_strlen(as_loc_conf->default_hosts.data);
-	}
+	// Stroing the default hosts provided in the arguement for the configuration.
+	as_conf->default_hosts.data = arguments[1].data;
+	as_conf->default_hosts.len = ngx_strlen(as_conf->default_hosts.data);
 
 	return NGX_CONF_OK;
 }
 
+/* This funnction sets the flag for the local configuratation to use the server context object. */
 static char* ngx_http_as_use_srv_conf(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
-	ngx_http_as_loc_conf_t *as_loc_conf;
-	as_loc_conf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_as_module);
-	as_loc_conf->use_server_conf = true;
+	ngx_http_as_conf_t *as_conf;
+	as_conf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_as_module);
+	as_conf->use_server_conf = true;
 	return NGX_CONF_OK;
 }
 
+/*
 static ngx_int_t ngx_http_as_connected_handler(ngx_http_request_t *r)
 {
 	ngx_int_t rc;
@@ -467,7 +414,7 @@ static char* ngx_http_as_connected(ngx_conf_t *cf, ngx_command_t *cmd, void *con
 		clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
 		clcf->handler = ngx_http_as_connected_handler;
 		return NGX_CONF_OK;
-}
+}*/
 
 /* This function accepts an aerospike object, and the hosts to be connected.
  * It then created the connected to the cluster.
