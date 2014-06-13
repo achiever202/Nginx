@@ -337,8 +337,11 @@ static ngx_int_t ngx_http_as_operate_handler(ngx_http_request_t *r)
 	int n  = 0;
 
 	char operation[10] = "";
-	ngx_http_as_utils_get_parsed_url_arguement(url, "op", operation);
+	//ngx_http_as_utils_get_parsed_url_arguement(url, "op", operation);
+	//ngx_write_stderr(operation);
 
+	ngx_write_stderr((char*)url.data);
+	ngx_http_as_utils_get_parsed_url_arguement(url, "op", operation);
 	ngx_write_stderr(operation);
 
 	if(strcmp(operation, "get")==0)
@@ -591,7 +594,15 @@ void ngx_http_as_utils_get_parsed_url_arguement(ngx_str_t url, char* arg, char v
 	int pos = 0, i;
 	bool flag = false;
 
-	char *temp = strtok((char*)url.data, "&");
+	int len = url.len;
+	char url_string[len];
+
+	char *temp = strtok((char*)url.data, " ");
+	strcpy(url_string, temp);
+	while(temp!=NULL)
+		temp = strtok(NULL, " ");
+
+	temp = strtok(url_string, "&");
 	while(temp!=NULL)
 	{
 		strcpy(temp_args[pos], temp);
