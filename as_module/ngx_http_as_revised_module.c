@@ -57,6 +57,8 @@ typedef struct
 
 static u_char connected[] = "Connected to aerospike!";
 static u_char not_connected[] = "Not connected to aerospike!";
+static u_char put_success[] = "Put successful";
+static u_char put_unsuccess[] = "Put not successful";
 /*static u_char connected_server[] = "Connected to server configuration!";
 static u_char not_connected_server[] = "Could not connect to server configuration!";
 static u_char connected_local[] = "Connected to local configuration!";
@@ -73,12 +75,14 @@ static char* ngx_http_as_connect(ngx_conf_t *cf, ngx_command_t *cmd, void* conf)
 static char* ngx_http_as_use_srv_conf(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 static char* ngx_http_as_operate(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 
+
 bool ngx_http_as_operate_connect(ngx_http_request_t *r, ngx_http_as_conf_t *as_conf);
-int ngx_http_as_utils_put(ngx_http_request_t *r, ngx_str_t);
+bool ngx_http_as_operate_put(ngx_str_t url, aerospike *as);
+
 bool ngx_http_as_utils_connect(aerospike **as, ngx_http_as_hosts hosts);
 void ngx_http_as_utils_create_config(as_config *cfg, ngx_http_as_hosts hosts);
 void ngx_http_as_utils_get_hosts(char *arg, ngx_http_as_hosts *hosts);
-void ngx_http_as_utils_get_parsed_url_arguement(ngx_str_t url, char *arg, char value[]);
+bool ngx_http_as_utils_get_parsed_url_arguement(ngx_str_t url, char *arg, char value[]);
 void ngx_http_as_utils_replace(char * o_string, char * s_string, char * r_string);
 
 static ngx_command_t ngx_http_as_commands[] = {
@@ -218,11 +222,37 @@ static ngx_int_t ngx_http_as_operate_handler(ngx_http_request_t *r)
 	//ngx_write_stderr((char*)is_connected);
 	if(is_connected)
 	{
-		b->pos = connected;
-		b->last = connected + sizeof(connected) - 1;
+		char operation[10] = "";
 
-		r->headers_out.status = NGX_HTTP_OK;
-		r->headers_out.content_length_n = sizeof(connected)-1;
+		ngx_http_as_utils_get_parsed_url_arguement(r->args, "op", operation);
+
+		if(strcmp("put", operation)==0)
+		{
+			if(ngx_http_as_operate_put(r->args, as_conf->as))
+			{
+				b->pos = put_success;
+				b->last = put_success + sizeof(put_success) - 1;
+
+				r->headers_out.status = NGX_HTTP_OK;
+				r->headers_out.content_length_n = sizeof(put_success)-1;
+			}
+			else
+			{
+				b->pos = put_unsuccess;
+				b->last = put_unsuccess + sizeof(put_unsuccess) - 1;
+
+				r->headers_out.status = NGX_HTTP_OK;
+				r->headers_out.content_length_n = sizeof(put_unsuccess)-1;
+			}
+		}
+		else
+		{
+			b->pos = connected;
+			b->last = connected + sizeof(connected) - 1;
+
+			r->headers_out.status = NGX_HTTP_OK;
+			r->headers_out.content_length_n = sizeof(connected)-1;
+		}
 	}
 	else
 	{
@@ -258,17 +288,17 @@ bool ngx_http_as_operate_connect(ngx_http_request_t *r, ngx_http_as_conf_t *as_c
 	ngx_http_as_hosts hosts;
 	bool hosts_arrived_in_url = false;
 
-	ngx_write_stderr("writng url string: ");
+	/*ngx_write_stderr("writng url string: ");
 	ngx_write_stderr((char*)r->args.data);
-	ngx_write_stderr("\n");
+	ngx_write_stderr("\n");*/
 
 	// getting the hosts string from the url.
 	char hosts_string[1000] = "";
 	ngx_http_as_utils_get_parsed_url_arguement(r->args, "hosts", hosts_string);
 
-	ngx_write_stderr("writng hosts_string: ");
+	/*ngx_write_stderr("writng hosts_string: ");
 	ngx_write_stderr(hosts_string);
-	ngx_write_stderr("\n");
+	ngx_write_stderr("\n");*/
 
 	// if the url contains ip and ports, setting the hosts_string to true, and parsing the host string.
 	if(strlen(hosts_string)>0)
@@ -317,6 +347,50 @@ bool ngx_http_as_operate_connect(ngx_http_request_t *r, ngx_http_as_conf_t *as_c
 	}
 	return false;
 }
+
+bool ngx_http_as_operate_put(ngx_str_t url, aerospike *as)
+{
+	//ngx_write_stderr("In put function\n");
+
+
+	//ngx_http_as_conf_t *as_conf = ngx_http_get_module_loc_conf(r, ngx_http_as_module);
+
+	if(as==NULL)
+		return false;
+
+	char key[1000], namespace[40], set[100], bin[1000], value[1000];
+
+	ngx_http_as_utils_get_parsed_url_arguement(url, "ns", namespace);
+	ngx_http_as_utils_get_parsed_url_arguement(url, "set", set);
+	ngx_http_as_utils_get_parsed_url_arguement(url, "key", key);
+	ngx_http_as_utils_get_parsed_url_arguement(url, "bin", bin);
+	bool is_str = ngx_http_as_utils_get_parsed_url_arguement(url, "value", value);
+
+	as_key put_key;
+	as_key_init(&put_key, namespace, set, key);
+
+	as_record rec;
+	as_record_inita(&rec, 1);
+	if(is_str)
+	{
+		as_record_set_str(&rec, bin, value);
+	}
+	else
+	{
+		int value_int = atoi(value);
+		as_record_set_int64(&rec, bin, value_int);
+	}
+
+	as_error err;
+	if(aerospike_key_put(as, &err, NULL, &put_key, &rec)!=AEROSPIKE_OK)
+	{
+		return false;
+	}
+	else
+		return true;
+}
+
+
 
 /* This function sets up the as_connect directive.
  * It takes one arguements, which is the default hosts string, of the form, 127.0.0.1:3000,127.0.0.1:4000
@@ -439,13 +513,13 @@ void ngx_http_as_utils_get_hosts(char *arg, ngx_http_as_hosts *hosts)
 	}
 }
 
-void ngx_http_as_utils_get_parsed_url_arguement(ngx_str_t url, char* arg, char value[])
+bool ngx_http_as_utils_get_parsed_url_arguement(ngx_str_t url, char* arg, char value[])
 {
 	char temp2[1000], temp3[1000];
 	char temp_args[100][1000];
 	int pos = 0, i;
 	bool flag = false;
-
+	bool is_str = false;
 	int len = url.len;
 	char url_string[len];
 
@@ -486,6 +560,8 @@ void ngx_http_as_utils_get_parsed_url_arguement(ngx_str_t url, char* arg, char v
 
 		if(flag)
 		{
+			is_str = (temp3[0]=='%')?true:false;
+
 			ngx_http_as_utils_replace(temp3, "%22", "\"");
 			ngx_write_stderr("writng value string: ");
 			ngx_write_stderr(temp3);
@@ -498,42 +574,8 @@ void ngx_http_as_utils_get_parsed_url_arguement(ngx_str_t url, char* arg, char v
 			strcpy(value, temp);
 		}
 	}
-}
 
-int ngx_http_as_utils_put(ngx_http_request_t *r, ngx_str_t url)
-{
-	ngx_write_stderr("In put function\n");
-
-
-	ngx_http_as_conf_t *as_conf = ngx_http_get_module_loc_conf(r, ngx_http_as_module);
-
-	if(as_conf->as==NULL)
-		ngx_write_stderr("Shit! Its null\n");
-	else
-		ngx_write_stderr("Everythings fine mate!\n");
-
-	char key[1000], namespace[40], set[100], bin[1000], value[1000];
-
-	ngx_http_as_utils_get_parsed_url_arguement(url, "ns", namespace);
-	ngx_http_as_utils_get_parsed_url_arguement(url, "set", set);
-	ngx_http_as_utils_get_parsed_url_arguement(url, "key", key);
-	ngx_http_as_utils_get_parsed_url_arguement(url, "bin", bin);
-	ngx_http_as_utils_get_parsed_url_arguement(url, "value", value);
-
-	as_key put_key;
-	as_key_init(&put_key, namespace, set, key);
-
-	as_record rec;
-	as_record_inita(&rec, 1);
-	as_record_set_str(&rec, bin, value);
-
-	as_error err;
-	if(aerospike_key_put(as_conf->as, &err, NULL, &put_key, &rec)!=AEROSPIKE_OK)
-	{
-		return 0;
-	}
-	else
-		return 1;
+	return is_str;
 }
 
 void ngx_http_as_utils_replace(char * o_string, char * s_string, char * r_string)
