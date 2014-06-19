@@ -59,6 +59,8 @@ static u_char connected[] = "Connected to aerospike!";
 static u_char not_connected[] = "Not connected to aerospike!";
 static u_char put_success[] = "Put successful";
 static u_char put_unsuccess[] = "Put not successful";
+static u_char get_success[] = "Get successful";
+static u_char get_unsuccess[] = "Get not successful";
 /*static u_char connected_server[] = "Connected to server configuration!";
 static u_char not_connected_server[] = "Could not connect to server configuration!";
 static u_char connected_local[] = "Connected to local configuration!";
@@ -78,12 +80,15 @@ static char* ngx_http_as_operate(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
 bool ngx_http_as_operate_connect(ngx_http_request_t *r, ngx_http_as_conf_t *as_conf);
 bool ngx_http_as_operate_put(ngx_str_t url, aerospike *as);
+bool ngx_http_as_operate_get(ngx_str_t url, aerospike *as, char** response);
 
 bool ngx_http_as_utils_connect(aerospike **as, ngx_http_as_hosts hosts);
 void ngx_http_as_utils_create_config(as_config *cfg, ngx_http_as_hosts hosts);
 void ngx_http_as_utils_get_hosts(char *arg, ngx_http_as_hosts *hosts);
 bool ngx_http_as_utils_get_parsed_url_arguement(ngx_str_t url, char *arg, char value[]);
 void ngx_http_as_utils_replace(char * o_string, char * s_string, char * r_string);
+void ngx_http_as_utils_dump_record(as_record *p_rec, char** response);
+void ngx_http_as_utils_dump_bin(const as_bin* p_bin);
 
 static ngx_command_t ngx_http_as_commands[] = {
 	{
@@ -245,6 +250,26 @@ static ngx_int_t ngx_http_as_operate_handler(ngx_http_request_t *r)
 				r->headers_out.content_length_n = sizeof(put_unsuccess)-1;
 			}
 		}
+		else if(strcmp("get", operation)==0)
+		{
+			char *response = NULL;
+			if(ngx_http_as_operate_get(r->args, as_conf->as, &response))
+			{
+				b->pos = get_success;
+				b->last = get_success + sizeof(get_success) - 1;
+
+				r->headers_out.status = NGX_HTTP_OK;
+				r->headers_out.content_length_n = sizeof(get_success)-1;
+			}
+			else
+			{
+				b->pos = get_unsuccess;
+				b->last = get_unsuccess + sizeof(get_unsuccess) - 1;
+
+				r->headers_out.status = NGX_HTTP_OK;
+				r->headers_out.content_length_n = sizeof(get_unsuccess)-1;
+			}
+		}
 		else
 		{
 			b->pos = connected;
@@ -388,6 +413,40 @@ bool ngx_http_as_operate_put(ngx_str_t url, aerospike *as)
 	}
 	else
 		return true;
+}
+
+bool ngx_http_as_operate_get(ngx_str_t url, aerospike *as, char **response)
+{
+	if(as==NULL)
+	{
+		ngx_write_stderr("as object null in as_operate_get\n");
+		return false;
+	}
+
+	char key[1000], namespace[40], set[100];
+
+	ngx_http_as_utils_get_parsed_url_arguement(url, "ns", namespace);
+	ngx_http_as_utils_get_parsed_url_arguement(url, "set", set);
+	ngx_http_as_utils_get_parsed_url_arguement(url, "key", key);
+
+	as_key get_key;
+	as_key_init_str(&get_key, namespace, set, key);
+
+	as_error err;
+	as_record* p_rec = NULL;
+
+	// Read the (whole) test record from the database.
+	if (aerospike_key_get(as, &err, NULL, &get_key, &p_rec) != AEROSPIKE_OK)
+	{
+		ngx_write_stderr("aerospike_key_get() failed in as_operate_get.\n");
+		ngx_write_stderr(err.message);
+	}
+	else
+	{
+		ngx_http_as_utils_dump_record(p_rec, response);
+		return true;
+	}
+	return false;
 }
 
 
@@ -603,4 +662,56 @@ void ngx_http_as_utils_replace(char * o_string, char * s_string, char * r_string
       strcpy(o_string, buffer);
       //pass recursively to replace other occurrences
       return ngx_http_as_utils_replace(o_string, s_string, r_string);
+ }
+
+ void ngx_http_as_utils_dump_bin(const as_bin* p_bin)
+ {
+ 	if (! p_bin)
+ 	{
+		ngx_write_stderr("  null as_bin object");
+		return;
+	}
+
+	char* val_as_str = as_val_tostring(as_bin_get_value(p_bin));
+
+	ngx_write_stderr("  ");
+	ngx_write_stderr(as_bin_get_name(p_bin));
+	ngx_write_stderr(" : ");
+	ngx_write_stderr(val_as_str);
+	ngx_write_stderr("\n");
+
+	free(val_as_str);
+ }
+
+ void ngx_http_as_utils_dump_record(as_record *p_rec, char** response)
+ {
+ 	if (! p_rec) {
+		ngx_write_stderr("  null as_record object");
+		return;
+	}
+
+	if (p_rec->key.valuep) {
+		char* key_val_as_str = as_val_tostring(p_rec->key.valuep);
+
+		ngx_write_stderr("  ");
+		ngx_write_stderr(key_val_as_str);
+		ngx_write_stderr("\n");
+
+		free(key_val_as_str);
+	}
+
+	//uint16_t num_bins = as_record_numbins(p_rec);
+
+	/*ngx_write_stderr("  generation %u, ttl %u, %u bin%s", p_rec->gen, p_rec->ttl, num_bins,
+			num_bins == 0 ? "s" : (num_bins == 1 ? ":" : "s:"));
+	ngx_write_stderr()*/
+
+	as_record_iterator it;
+	as_record_iterator_init(&it, p_rec);
+
+	while (as_record_iterator_has_next(&it)) {
+		ngx_http_as_utils_dump_bin(as_record_iterator_next(&it));
+	}
+
+	as_record_iterator_destroy(&it);
  }
