@@ -59,7 +59,7 @@ static u_char connected[] = "Connected to aerospike!";
 static u_char not_connected[] = "Not connected to aerospike!";
 static u_char put_success[] = "Put successful";
 static u_char put_unsuccess[] = "Put not successful";
-static u_char get_success[] = "Get successful";
+//static u_char get_success[] = "Get successful";
 static u_char get_unsuccess[] = "Get not successful";
 /*static u_char connected_server[] = "Connected to server configuration!";
 static u_char not_connected_server[] = "Could not connect to server configuration!";
@@ -80,15 +80,15 @@ static char* ngx_http_as_operate(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
 bool ngx_http_as_operate_connect(ngx_http_request_t *r, ngx_http_as_conf_t *as_conf);
 bool ngx_http_as_operate_put(ngx_str_t url, aerospike *as);
-bool ngx_http_as_operate_get(ngx_str_t url, aerospike *as, char** response);
+bool ngx_http_as_operate_get(ngx_str_t url, aerospike *as, char response[]);
 
 bool ngx_http_as_utils_connect(aerospike **as, ngx_http_as_hosts hosts);
 void ngx_http_as_utils_create_config(as_config *cfg, ngx_http_as_hosts hosts);
 void ngx_http_as_utils_get_hosts(char *arg, ngx_http_as_hosts *hosts);
 bool ngx_http_as_utils_get_parsed_url_arguement(ngx_str_t url, char *arg, char value[]);
 void ngx_http_as_utils_replace(char * o_string, char * s_string, char * r_string);
-void ngx_http_as_utils_dump_record(as_record *p_rec, char** response);
-void ngx_http_as_utils_dump_bin(const as_bin* p_bin);
+void ngx_http_as_utils_dump_record(as_record *p_rec, char response[]);
+void ngx_http_as_utils_dump_bin(const as_bin* p_bin, char response[]);
 
 static ngx_command_t ngx_http_as_commands[] = {
 	{
@@ -252,14 +252,18 @@ static ngx_int_t ngx_http_as_operate_handler(ngx_http_request_t *r)
 		}
 		else if(strcmp("get", operation)==0)
 		{
-			char *response = NULL;
-			if(ngx_http_as_operate_get(r->args, as_conf->as, &response))
+			char response[129000] = "\0";
+			if(ngx_http_as_operate_get(r->args, as_conf->as, response))
 			{
-				b->pos = get_success;
-				b->last = get_success + sizeof(get_success) - 1;
+				b->pos = (u_char*)response;
+				b->last = (u_char*)response + sizeof(response) - 1;
 
 				r->headers_out.status = NGX_HTTP_OK;
-				r->headers_out.content_length_n = sizeof(get_success)-1;
+				r->headers_out.content_length_n = sizeof(response)-1;
+
+				ngx_write_stderr("The final string is: \n");
+				ngx_write_stderr(response);
+				ngx_write_stderr("\n");
 			}
 			else
 			{
@@ -415,7 +419,7 @@ bool ngx_http_as_operate_put(ngx_str_t url, aerospike *as)
 		return true;
 }
 
-bool ngx_http_as_operate_get(ngx_str_t url, aerospike *as, char **response)
+bool ngx_http_as_operate_get(ngx_str_t url, aerospike *as, char response[])
 {
 	if(as==NULL)
 	{
@@ -664,7 +668,7 @@ void ngx_http_as_utils_replace(char * o_string, char * s_string, char * r_string
       return ngx_http_as_utils_replace(o_string, s_string, r_string);
  }
 
- void ngx_http_as_utils_dump_bin(const as_bin* p_bin)
+ void ngx_http_as_utils_dump_bin(const as_bin* p_bin, char response[])
  {
  	if (! p_bin)
  	{
@@ -680,10 +684,17 @@ void ngx_http_as_utils_replace(char * o_string, char * s_string, char * r_string
 	ngx_write_stderr(val_as_str);
 	ngx_write_stderr("\n");
 
+	strncat(response, "\t\t", strlen("\t\t"));
+	strncat(response, as_bin_get_name(p_bin), strlen(as_bin_get_name(p_bin)));
+	strncat(response, ":", strlen(":"));
+	strncat(response, val_as_str, strlen(val_as_str));
+	strncat(response, "\n", strlen("\n"));
+
 	free(val_as_str);
+	//free(name_as_str);
  }
 
- void ngx_http_as_utils_dump_record(as_record *p_rec, char** response)
+ void ngx_http_as_utils_dump_record(as_record *p_rec, char response[])
  {
  	if (! p_rec) {
 		ngx_write_stderr("  null as_record object");
@@ -700,18 +711,54 @@ void ngx_http_as_utils_replace(char * o_string, char * s_string, char * r_string
 		free(key_val_as_str);
 	}
 
-	//uint16_t num_bins = as_record_numbins(p_rec);
+	uint16_t num_bins = as_record_numbins(p_rec);
+
+	// starting the json formatted string.
+	strncat(response, "{\n", strlen("{\n"));
+
+	// starting metadata block.
+	strncat(response, "\tMeta-data:\n\t{\n", strlen("\tMeta-data:\n\t{\n"));
+
+	// appending the number of bins.
+	char temp_json_string[100];
+	sprintf(temp_json_string, "%d", (int)num_bins);
+	strncat(response, "\t\tNumber of bins: ", strlen("\t\tumber of bins: "));
+	strncat(response, temp_json_string, strlen(temp_json_string));
+	strncat(response, "\n", strlen("\n"));
+
+	// appending the generation
+	sprintf(temp_json_string, "%d", (int)p_rec->gen);
+	strncat(response, "\t\tGeneration: ", strlen("\t\tGeneration: "));
+	strncat(response, temp_json_string, strlen(temp_json_string));
+	strncat(response, "\n", strlen("\n"));
+
+	// appending the ttl.
+	sprintf(temp_json_string, "%d", (int)p_rec->ttl);
+	strncat(response, "\t\tTime to live: ", strlen("\t\tTime to live: "));
+	strncat(response, temp_json_string, strlen(temp_json_string));
+	strncat(response, "\n\t", strlen("\n"));
+
+	// Ending metadata.
+	strncat(response, "\t}\n", strlen("\t}\n"));
 
 	/*ngx_write_stderr("  generation %u, ttl %u, %u bin%s", p_rec->gen, p_rec->ttl, num_bins,
 			num_bins == 0 ? "s" : (num_bins == 1 ? ":" : "s:"));
 	ngx_write_stderr()*/
 
+	// Starting the bins block
+	strncat(response, "\tBins:\n\t{\n", strlen("\tBins:\n\t{\n"));
 	as_record_iterator it;
 	as_record_iterator_init(&it, p_rec);
 
 	while (as_record_iterator_has_next(&it)) {
-		ngx_http_as_utils_dump_bin(as_record_iterator_next(&it));
+		ngx_http_as_utils_dump_bin(as_record_iterator_next(&it), response);
 	}
 
 	as_record_iterator_destroy(&it);
+
+	// Ending bin block
+	strncat(response, "\t}\n", strlen("\t}\n"));
+
+	// Ending string
+	strncat(response, "}", strlen("}"));
  }
