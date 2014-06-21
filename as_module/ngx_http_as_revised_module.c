@@ -668,22 +668,23 @@ void ngx_http_as_utils_replace(char * o_string, char * s_string, char * r_string
       return ngx_http_as_utils_replace(o_string, s_string, r_string);
  }
 
- void ngx_http_as_utils_dump_bin(const as_bin* p_bin, char response[])
- {
+/* This function formats a bin as a json in the response string.
+ * The first parameter is the bin to be formatted.
+ * The second parameter is the response string.
+ */
+void ngx_http_as_utils_dump_bin(const as_bin* p_bin, char response[])
+{
+	// if the bin is null, writing to the log file.
  	if (! p_bin)
  	{
-		ngx_write_stderr("  null as_bin object");
+		ngx_write_stderr("Bin passed to dump_bin is null.\n");
 		return;
 	}
 
+	// obtaing the value of bin as json formatted string.
 	char* val_as_str = as_val_tostring(as_bin_get_value(p_bin));
 
-	ngx_write_stderr("  ");
-	ngx_write_stderr(as_bin_get_name(p_bin));
-	ngx_write_stderr(" : ");
-	ngx_write_stderr(val_as_str);
-	ngx_write_stderr("\n");
-
+	// writing the bin name, and the bin value into the response string.
 	strncat(response, "\t\t", strlen("\t\t"));
 	strncat(response, "\"", strlen("\""));
 	strncat(response, as_bin_get_name(p_bin), strlen(as_bin_get_name(p_bin)));
@@ -692,42 +693,37 @@ void ngx_http_as_utils_replace(char * o_string, char * s_string, char * r_string
 	strncat(response, val_as_str, strlen(val_as_str));
 
 	free(val_as_str);
-	//free(name_as_str);
  }
 
- void ngx_http_as_utils_dump_record(as_record *p_rec, char response[])
- {
- 	if (! p_rec) {
-		ngx_write_stderr("  null as_record object");
+/* This function creates the json formatted string for a record.
+ * The first parameter is the record, whose json formatting is to be done.
+ * The second parameter is a character array, which stores the json of the record.
+ */
+void ngx_http_as_utils_dump_record(as_record *p_rec, char response[])
+{
+	// If the record is null, write to the log file.
+	if (! p_rec) {
+		ngx_write_stderr("The record object passed to dump_record is null.");
 		return;
 	}
 
-	if (p_rec->key.valuep) {
-		char* key_val_as_str = as_val_tostring(p_rec->key.valuep);
-
-		ngx_write_stderr("  ");
-		ngx_write_stderr(key_val_as_str);
-		ngx_write_stderr("\n");
-
-		free(key_val_as_str);
-	}
-
+	// Obtaining the number of bins in the record.
 	uint16_t num_bins = as_record_numbins(p_rec);
 
-	// starting the json formatted string.
+	// Starting the json formatted string.
 	strncat(response, "{\n", strlen("{\n"));
 
-	// starting metadata block.
+	// Starting metadata block.
 	strncat(response, "\t\"Meta-data\":\n\t{\n", strlen("\t\"Meta-data\":\n\t{\n"));
 
-	// appending the number of bins.
+	// Appending the number of bins.
 	char temp_json_string[100];
 	sprintf(temp_json_string, "%d", (int)num_bins);
-	strncat(response, "\t\t\"Number of bins\": ", strlen("\t\t\"Number of bins\": "));
+	strncat(response, "\t\t\"Num_bins\": ", strlen("\t\t\"Num_bins\": "));
 	strncat(response, temp_json_string, strlen(temp_json_string));
 	strncat(response, ",\n", strlen(",\n"));
 
-	// appending the generation
+	// Appending the generation of the record
 	sprintf(temp_json_string, "%d", (int)p_rec->gen);
 	strncat(response, "\t\t\"Generation\": ", strlen("\t\t\"Generation\": "));
 	strncat(response, temp_json_string, strlen(temp_json_string));
@@ -735,32 +731,35 @@ void ngx_http_as_utils_replace(char * o_string, char * s_string, char * r_string
 
 	// appending the ttl.
 	sprintf(temp_json_string, "%d", (int)p_rec->ttl);
-	strncat(response, "\t\t\"Time to live\": ", strlen("\t\t\"Time to live\": "));
+	strncat(response, "\t\t\"Ttl\": ", strlen("\t\t\"Ttl\": "));
 	strncat(response, temp_json_string, strlen(temp_json_string));
 	strncat(response, "\n", strlen("\n"));
 
 	// Ending metadata.
 	strncat(response, "\t},\n", strlen("\t},\n"));
 
-	/*ngx_write_stderr("  generation %u, ttl %u, %u bin%s", p_rec->gen, p_rec->ttl, num_bins,
-			num_bins == 0 ? "s" : (num_bins == 1 ? ":" : "s:"));
-	ngx_write_stderr()*/
-
 	// Starting the bins block
 	strncat(response, "\t\"Bins\":\n\t{\n", strlen("\t\"Bins\":\n\t{\n"));
 	as_record_iterator it;
 	as_record_iterator_init(&it, p_rec);
 
+	// for json formatting, excluding the first bin.
 	int ctr = 0;
 
-	while (as_record_iterator_has_next(&it)) {
+	// for each bin in the record.
+	while (as_record_iterator_has_next(&it))
+	{
 
+		// print "," after each record except the last one.
 		if(ctr)
 			strncat(response, ",\n", strlen(",\n"));
 
+		// format the bin as json.
 		ngx_http_as_utils_dump_bin(as_record_iterator_next(&it), response);
 		ctr = 1;
 	}
+
+	// not appending "," at the end of last bin.
 	strncat(response, "\n", strlen("\n"));
 
 	as_record_iterator_destroy(&it);
