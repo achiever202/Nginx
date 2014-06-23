@@ -81,6 +81,7 @@ static char* ngx_http_as_operate(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 bool ngx_http_as_operate_connect(ngx_http_request_t *r, ngx_http_as_conf_t *as_conf);
 bool ngx_http_as_operate_put(ngx_str_t url, aerospike *as);
 void ngx_http_as_operate_get(ngx_str_t url, aerospike *as, char response[]);
+void ngx_http_as_operate_del(ngx_str_t url, aerospike *as, char response[]);
 
 bool ngx_http_as_utils_connect(aerospike **as, ngx_http_as_hosts hosts);
 void ngx_http_as_utils_create_config(as_config *cfg, ngx_http_as_hosts hosts);
@@ -255,6 +256,21 @@ static ngx_int_t ngx_http_as_operate_handler(ngx_http_request_t *r)
 		{
 			char response[129000] = "\0";
 			ngx_http_as_operate_get(r->args, as_conf->as, response);
+			
+			b->pos = (u_char*)response;
+			b->last = (u_char*)response + sizeof(response) - 1;
+
+			r->headers_out.status = NGX_HTTP_OK;
+			r->headers_out.content_length_n = sizeof(response)-1;
+
+			ngx_write_stderr("The final string is: \n");
+			ngx_write_stderr(response);
+			ngx_write_stderr("\n");
+		}
+		else if(strcmp("del", operation)==0)
+		{
+			char response[129000] = "\0";
+			ngx_http_as_operate_del(r->args, as_conf->as, response);
 			
 			b->pos = (u_char*)response;
 			b->last = (u_char*)response + sizeof(response) - 1;
@@ -445,6 +461,35 @@ void ngx_http_as_operate_get(ngx_str_t url, aerospike *as, char response[])
 		ngx_http_as_utils_dump_error(err, response, ",");
 		ngx_http_as_utils_dump_record(p_rec, err, response);
 	}
+}
+
+void ngx_http_as_operate_del(ngx_str_t url, aerospike *as, char response[])
+{
+	if(as==NULL)
+	{
+		ngx_write_stderr("as object null in as_operate_del\n");
+		strncat(response, "as object null in as_operate_del\n", strlen("as object null in as_operate_del\n"));
+		return;
+	}
+
+	char key[1000], namespace[40], set[100];
+
+	ngx_http_as_utils_get_parsed_url_arguement(url, "ns", namespace);
+	ngx_http_as_utils_get_parsed_url_arguement(url, "set", set);
+	ngx_http_as_utils_get_parsed_url_arguement(url, "key", key);
+
+	as_key del_key;
+	as_key_init_str(&del_key, namespace, set, key);
+
+	// Starting the json formatted string.
+	strncat(response, "{\n", strlen("{\n"));
+
+	as_error err;
+
+	// Delete the (whole) test record from the database.
+	aerospike_key_remove(as, &err, NULL, &del_key);
+	
+	ngx_http_as_utils_dump_error(err, response, "");
 }
 
 
