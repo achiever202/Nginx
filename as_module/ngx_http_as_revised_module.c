@@ -60,7 +60,7 @@ static u_char not_connected[] = "Not connected to aerospike!";
 static u_char put_success[] = "Put successful";
 static u_char put_unsuccess[] = "Put not successful";
 //static u_char get_success[] = "Get successful";
-static u_char get_unsuccess[] = "Get not successful";
+//static u_char get_unsuccess[] = "Get not successful";
 /*static u_char connected_server[] = "Connected to server configuration!";
 static u_char not_connected_server[] = "Could not connect to server configuration!";
 static u_char connected_local[] = "Connected to local configuration!";
@@ -80,15 +80,16 @@ static char* ngx_http_as_operate(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
 bool ngx_http_as_operate_connect(ngx_http_request_t *r, ngx_http_as_conf_t *as_conf);
 bool ngx_http_as_operate_put(ngx_str_t url, aerospike *as);
-bool ngx_http_as_operate_get(ngx_str_t url, aerospike *as, char response[]);
+void ngx_http_as_operate_get(ngx_str_t url, aerospike *as, char response[]);
 
 bool ngx_http_as_utils_connect(aerospike **as, ngx_http_as_hosts hosts);
 void ngx_http_as_utils_create_config(as_config *cfg, ngx_http_as_hosts hosts);
 void ngx_http_as_utils_get_hosts(char *arg, ngx_http_as_hosts *hosts);
 bool ngx_http_as_utils_get_parsed_url_arguement(ngx_str_t url, char *arg, char value[]);
 void ngx_http_as_utils_replace(char * o_string, char * s_string, char * r_string);
-void ngx_http_as_utils_dump_record(as_record *p_rec, char response[]);
+void ngx_http_as_utils_dump_record(as_record *p_rec, as_error err, char response[]);
 void ngx_http_as_utils_dump_bin(const as_bin* p_bin, char response[]);
+void ngx_http_as_utils_dump_error(as_error err, char response[], char* last_char);
 
 static ngx_command_t ngx_http_as_commands[] = {
 	{
@@ -253,26 +254,17 @@ static ngx_int_t ngx_http_as_operate_handler(ngx_http_request_t *r)
 		else if(strcmp("get", operation)==0)
 		{
 			char response[129000] = "\0";
-			if(ngx_http_as_operate_get(r->args, as_conf->as, response))
-			{
-				b->pos = (u_char*)response;
-				b->last = (u_char*)response + sizeof(response) - 1;
+			ngx_http_as_operate_get(r->args, as_conf->as, response);
+			
+			b->pos = (u_char*)response;
+			b->last = (u_char*)response + sizeof(response) - 1;
 
-				r->headers_out.status = NGX_HTTP_OK;
-				r->headers_out.content_length_n = sizeof(response)-1;
+			r->headers_out.status = NGX_HTTP_OK;
+			r->headers_out.content_length_n = sizeof(response)-1;
 
-				ngx_write_stderr("The final string is: \n");
-				ngx_write_stderr(response);
-				ngx_write_stderr("\n");
-			}
-			else
-			{
-				b->pos = get_unsuccess;
-				b->last = get_unsuccess + sizeof(get_unsuccess) - 1;
-
-				r->headers_out.status = NGX_HTTP_OK;
-				r->headers_out.content_length_n = sizeof(get_unsuccess)-1;
-			}
+			ngx_write_stderr("The final string is: \n");
+			ngx_write_stderr(response);
+			ngx_write_stderr("\n");
 		}
 		else
 		{
@@ -419,12 +411,13 @@ bool ngx_http_as_operate_put(ngx_str_t url, aerospike *as)
 		return true;
 }
 
-bool ngx_http_as_operate_get(ngx_str_t url, aerospike *as, char response[])
+void ngx_http_as_operate_get(ngx_str_t url, aerospike *as, char response[])
 {
 	if(as==NULL)
 	{
 		ngx_write_stderr("as object null in as_operate_get\n");
-		return false;
+		strncat(response, "as object null in as_operate_get\n", strlen("as object null in as_operate_get\n"));
+		return;
 	}
 
 	char key[1000], namespace[40], set[100];
@@ -439,18 +432,19 @@ bool ngx_http_as_operate_get(ngx_str_t url, aerospike *as, char response[])
 	as_error err;
 	as_record* p_rec = NULL;
 
+	// Starting the json formatted string.
+	strncat(response, "{\n", strlen("{\n"));
+
 	// Read the (whole) test record from the database.
 	if (aerospike_key_get(as, &err, NULL, &get_key, &p_rec) != AEROSPIKE_OK)
 	{
-		ngx_write_stderr("aerospike_key_get() failed in as_operate_get.\n");
-		ngx_write_stderr(err.message);
+		ngx_http_as_utils_dump_error(err, response, "");
 	}
 	else
 	{
-		ngx_http_as_utils_dump_record(p_rec, response);
-		return true;
+		ngx_http_as_utils_dump_error(err, response, ",");
+		ngx_http_as_utils_dump_record(p_rec, err, response);
 	}
-	return false;
 }
 
 
@@ -699,7 +693,7 @@ void ngx_http_as_utils_dump_bin(const as_bin* p_bin, char response[])
  * The first parameter is the record, whose json formatting is to be done.
  * The second parameter is a character array, which stores the json of the record.
  */
-void ngx_http_as_utils_dump_record(as_record *p_rec, char response[])
+void ngx_http_as_utils_dump_record(as_record *p_rec, as_error err, char response[])
 {
 	// If the record is null, write to the log file.
 	if (! p_rec) {
@@ -710,11 +704,8 @@ void ngx_http_as_utils_dump_record(as_record *p_rec, char response[])
 	// Obtaining the number of bins in the record.
 	uint16_t num_bins = as_record_numbins(p_rec);
 
-	// Starting the json formatted string.
-	strncat(response, "{\n", strlen("{\n"));
-
 	// Starting metadata block.
-	strncat(response, "\t\"Meta-data\":\n\t{\n", strlen("\t\"Meta-data\":\n\t{\n"));
+	strncat(response, "\t\"Metadata\":\n\t{\n", strlen("\t\"Meta-data\":\n\t{\n"));
 
 	// Appending the number of bins.
 	char temp_json_string[100];
@@ -769,4 +760,56 @@ void ngx_http_as_utils_dump_record(as_record *p_rec, char response[])
 
 	// Ending string
 	strncat(response, "}", strlen("}"));
+ }
+
+ void ngx_http_as_utils_dump_error(as_error err, char response[], char* last_char)
+ {
+ 	//Starting the error block.
+ 	strncat(response, "\t\"Error\":\n\t{\n", strlen("\t\"Error\":\n\t{\n"));
+
+ 	// Adding the status code to the json string.
+ 	char status_code[5];
+ 	sprintf(status_code, "%d", err.code);
+ 	strncat(response, "\t\t\"Code\":", strlen("\t\t\"Code\":"));
+ 	strncat(response, status_code, strlen(status_code));
+ 	strncat(response, ",\n", strlen(",\n"));
+
+ 	// Adding the message to the json string.
+ 	strncat(response, "\t\t\"Message\":\"", strlen("\t\t\"Message\":\""));
+ 	strncat(response, err.message, strlen(err.message));
+ 	strncat(response, "\",\n", strlen("\",\n"));
+
+ 	// Adding the funtion where the error occured.
+ 	strncat(response, "\t\t\"Function\":\"", strlen("\t\t\"Function\":\""));
+ 	if(err.func==NULL)
+ 		strncat(response, "Null", strlen("Null"));
+ 	else
+ 		strncat(response, err.func, strlen(err.func));
+ 	strncat(response, "\",\n", strlen("\",\n"));
+
+ 	// Adding the file where the error occured.
+ 	strncat(response, "\t\t\"File\":\"", strlen("\t\t\"File\":\""));
+ 	if(err.func==NULL)
+ 		strncat(response, "Null", strlen("Null"));
+ 	else
+ 		strncat(response, err.file, strlen(err.file));
+ 	strncat(response, "\",\n", strlen("\",\n"));
+
+ 	// Adding the line where the error occured.
+ 	strncat(response, "\t\t\"Line\":", strlen("\t\t\"Line\":"));
+ 	if(err.func==NULL)
+ 		strncat(response, "\"Null\"", strlen("\"Null\""));
+ 	else
+ 	{
+ 		char line[10000] = "";
+ 		sprintf(line, "%d", (int)err.line);
+ 		strncat(response, line, strlen(line));
+ 	}
+ 	strncat(response, "\n", strlen("\n"));
+
+ 	// Ending the error block
+ 	if(strcmp(last_char, ",")==0)
+ 		strncat(response, "\t},\n", strlen("\t},\n"));
+ 	else
+ 		strncat(response, "\t}\n}", strlen("\t}\n}"));
  }
