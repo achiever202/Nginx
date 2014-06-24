@@ -588,9 +588,9 @@ bool ngx_http_as_utils_get_parsed_url_arguement(ngx_str_t url, char* arg, char v
 		while(temp!=NULL)
 			temp = strtok(NULL, " ");
 
-		ngx_write_stderr("writng space removed_string: ");
-		ngx_write_stderr(url_string);
-		ngx_write_stderr("\n");
+		//ngx_write_stderr("writng space removed_string: ");
+		//ngx_write_stderr(url_string);
+		//ngx_write_stderr("\n");
 
 		temp = strtok(url_string, "&");
 		while(temp!=NULL)
@@ -621,15 +621,16 @@ bool ngx_http_as_utils_get_parsed_url_arguement(ngx_str_t url, char* arg, char v
 			is_str = (temp3[0]=='%')?true:false;
 
 			ngx_http_as_utils_replace(temp3, "%22", "\"");
-			ngx_write_stderr("writng value string: ");
-			ngx_write_stderr(temp3);
-			ngx_write_stderr("\n");
+			//ngx_write_stderr("writng value string: ");
+			//ngx_write_stderr(temp3);
+			//ngx_write_stderr("\n");
 			temp = strtok(temp3, "\"");
 
-			ngx_write_stderr("writng parsed_string: ");
-			ngx_write_stderr(temp);
-			ngx_write_stderr("\n");
-			strcpy(value, temp);
+			//ngx_write_stderr("writng parsed_string: ");
+			//ngx_write_stderr(temp);
+			//ngx_write_stderr("\n");
+			if(temp!=NULL)
+				strcpy(value, temp);
 		}
 	}
 
