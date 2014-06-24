@@ -195,9 +195,7 @@ static void* ngx_http_as_module_create_loc_conf(ngx_conf_t *cf)
 
 static ngx_int_t ngx_http_as_operate_handler(ngx_http_request_t *r)
 {
-	//ngx_write_stderr("In as_operate handler\n");
-	//ngx_write_stderr((char*)r->args.data);
-
+	// Variables for sending back response.
 	ngx_int_t rc;
 	ngx_buf_t *b;
 	ngx_chain_t out;
@@ -207,65 +205,76 @@ static ngx_int_t ngx_http_as_operate_handler(ngx_http_request_t *r)
 	if(rc!=NGX_OK)
 		return rc;
 
+	// Initialising headers.
 	r->headers_out.content_type_len = sizeof("text/html")-1;
 	r->headers_out.content_type.len = sizeof("text/html")-1;
 	r->headers_out.content_type.data = (u_char *)"text/html";
 
+	// Allocating memory for the response buffer.
 	b = ngx_pcalloc(r->pool, sizeof(ngx_buf_t));
 	if(b==NULL)
 		return NGX_HTTP_INTERNAL_SERVER_ERROR;
 
+	// Adding it to the chain.
 	out.buf = b;
 	out.next = NULL;
 
+	// as_configuration to be used for the operations.
 	ngx_http_as_conf_t *as_conf;
 	as_conf = ngx_http_get_module_loc_conf(r, ngx_http_as_module);
 
+	// response string to be generated.
 	char response[129000] = "\0";
 
+	// If server configuration to be used, changing it to server configuration.
 	if(as_conf->use_server_conf)
 		as_conf = ngx_http_get_module_srv_conf(r, ngx_http_as_module);
 
+	// connecting to aerospike.
 	ngx_http_as_operate_connect(r, as_conf, response);
 
-	//ngx_write_stderr((char*)is_connected);
+	// if the cluster object is connected.
 	if(as_conf->connected)
 	{
 		char operation[10] = "";
 
+		// getting the operation parameter from the url, get/put/del.
 		ngx_http_as_utils_get_parsed_url_arguement(r->args, "op", operation);
 
+		// for put operation.
 		if(strcmp("put", operation)==0)
 		{
 			response[0] = '\0';
 			ngx_http_as_operate_put(r->args, as_conf->as, response);
 		}
+
+		// for get operation.
 		else if(strcmp("get", operation)==0)
 		{
 			response[0] = '\0';
-			ngx_http_as_operate_get(r->args, as_conf->as, response);
-			
+			ngx_http_as_operate_get(r->args, as_conf->as, response);			
 		}
+
+		// for del operation.
 		else if(strcmp("del", operation)==0)
 		{
 			response[0] = '\0';
 			ngx_http_as_operate_del(r->args, as_conf->as, response);
-
-			ngx_write_stderr("The final string is: \n");
-			ngx_write_stderr(response);
-			ngx_write_stderr("\n");
 		}
 	}
 
+	// copying the response string to the response buffer.
 	b->pos = (u_char*)response;
 	b->last = (u_char*)response + sizeof(response) - 1;
 
+	// setting headers.
 	r->headers_out.status = NGX_HTTP_OK;
 	r->headers_out.content_length_n = sizeof(response)-1;
 
 	b->memory = 1;
 	b->last_buf = 1;
 
+	// returning the reply.
 	rc = ngx_http_send_header(r);
 
 	if(rc==NGX_ERROR || rc>NGX_OK || r->header_only)
