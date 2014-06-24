@@ -55,8 +55,8 @@ typedef struct
 	int port[256];
 }ngx_http_as_hosts;
 
-static u_char connected[] = "Connected to aerospike!";
-static u_char not_connected[] = "Not connected to aerospike!";
+//static u_char connected[] = "Connected to aerospike!";
+//static u_char not_connected[] = "Not connected to aerospike!";
 static u_char put_success[] = "Put successful";
 static u_char put_unsuccess[] = "Put not successful";
 //static u_char get_success[] = "Get successful";
@@ -78,12 +78,12 @@ static char* ngx_http_as_use_srv_conf(ngx_conf_t *cf, ngx_command_t *cmd, void *
 static char* ngx_http_as_operate(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 
 
-bool ngx_http_as_operate_connect(ngx_http_request_t *r, ngx_http_as_conf_t *as_conf);
+void ngx_http_as_operate_connect(ngx_http_request_t *r, ngx_http_as_conf_t *as_conf, char response[]);
 bool ngx_http_as_operate_put(ngx_str_t url, aerospike *as);
 void ngx_http_as_operate_get(ngx_str_t url, aerospike *as, char response[]);
 void ngx_http_as_operate_del(ngx_str_t url, aerospike *as, char response[]);
 
-bool ngx_http_as_utils_connect(aerospike **as, ngx_http_as_hosts hosts);
+bool ngx_http_as_utils_connect(aerospike **as, ngx_http_as_hosts hosts, char response[]);
 void ngx_http_as_utils_create_config(as_config *cfg, ngx_http_as_hosts hosts);
 void ngx_http_as_utils_get_hosts(char *arg, ngx_http_as_hosts *hosts);
 bool ngx_http_as_utils_get_parsed_url_arguement(ngx_str_t url, char *arg, char value[]);
@@ -221,13 +221,15 @@ static ngx_int_t ngx_http_as_operate_handler(ngx_http_request_t *r)
 	ngx_http_as_conf_t *as_conf;
 	as_conf = ngx_http_get_module_loc_conf(r, ngx_http_as_module);
 
+	char response[129000] = "\0";
+
 	if(as_conf->use_server_conf)
 		as_conf = ngx_http_get_module_srv_conf(r, ngx_http_as_module);
 
-	bool is_connected = ngx_http_as_operate_connect(r, as_conf);
+	ngx_http_as_operate_connect(r, as_conf, response);
 
 	//ngx_write_stderr((char*)is_connected);
-	if(is_connected)
+	if(as_conf->connected)
 	{
 		char operation[10] = "";
 
@@ -254,7 +256,6 @@ static ngx_int_t ngx_http_as_operate_handler(ngx_http_request_t *r)
 		}
 		else if(strcmp("get", operation)==0)
 		{
-			char response[129000] = "\0";
 			ngx_http_as_operate_get(r->args, as_conf->as, response);
 			
 			b->pos = (u_char*)response;
@@ -284,20 +285,20 @@ static ngx_int_t ngx_http_as_operate_handler(ngx_http_request_t *r)
 		}
 		else
 		{
-			b->pos = connected;
-			b->last = connected + sizeof(connected) - 1;
+			b->pos = (u_char*)response;
+			b->last = (u_char*)response + sizeof(response) - 1;
 
 			r->headers_out.status = NGX_HTTP_OK;
-			r->headers_out.content_length_n = sizeof(connected)-1;
+			r->headers_out.content_length_n = sizeof(response)-1;
 		}
 	}
 	else
 	{
-		b->pos = not_connected;
-		b->last = not_connected + sizeof(not_connected) - 1;
+		b->pos = (u_char*)response;
+		b->last = (u_char*)response + sizeof(response) - 1;
 
 		r->headers_out.status = NGX_HTTP_OK;
-		r->headers_out.content_length_n = sizeof(not_connected)-1;
+		r->headers_out.content_length_n = sizeof(response)-1;
 	}
 
 	b->memory = 1;
@@ -313,29 +314,16 @@ static ngx_int_t ngx_http_as_operate_handler(ngx_http_request_t *r)
 
 }
 
-bool ngx_http_as_operate_connect(ngx_http_request_t *r, ngx_http_as_conf_t *as_conf)
+void ngx_http_as_operate_connect(ngx_http_request_t *r, ngx_http_as_conf_t *as_conf, char response[])
 {
-	//ngx_write_stderr("In ngx_http_as_operate_connect\n");
-	//ngx_write_stderr((char*)r->args.data);
-
-
-
 	// hosts stores the hosts address and ports to iniitailise the cluster object with.
 	// hosts_arrived_in_url checks whether the request contains the ip and ports.
 	ngx_http_as_hosts hosts;
 	bool hosts_arrived_in_url = false;
 
-	/*ngx_write_stderr("writng url string: ");
-	ngx_write_stderr((char*)r->args.data);
-	ngx_write_stderr("\n");*/
-
 	// getting the hosts string from the url.
 	char hosts_string[1000] = "";
 	ngx_http_as_utils_get_parsed_url_arguement(r->args, "hosts", hosts_string);
-
-	/*ngx_write_stderr("writng hosts_string: ");
-	ngx_write_stderr(hosts_string);
-	ngx_write_stderr("\n");*/
 
 	// if the url contains ip and ports, setting the hosts_string to true, and parsing the host string.
 	if(strlen(hosts_string)>0)
@@ -358,10 +346,9 @@ bool ngx_http_as_operate_connect(ngx_http_request_t *r, ngx_http_as_conf_t *as_c
 		}
 			
 		// connecting to new configurations.
-		if(ngx_http_as_utils_connect(&(as_conf->as), hosts))
+		if(ngx_http_as_utils_connect(&(as_conf->as), hosts, response))
 		{
 			as_conf->connected = true;
-			return true;
 		}
 	}
 	else
@@ -371,18 +358,12 @@ bool ngx_http_as_operate_connect(ngx_http_request_t *r, ngx_http_as_conf_t *as_c
 		if(!as_conf->connected)
 		{
 			ngx_http_as_utils_get_hosts((char*)as_conf->default_hosts.data, &hosts);
-			if(ngx_http_as_utils_connect(&(as_conf->as), hosts))
+			if(ngx_http_as_utils_connect(&(as_conf->as), hosts, response))
 			{
 				as_conf->connected = true;
-				return true;
 			}
 		}
-		else
-		{
-			return true;
-		}
 	}
-	return false;
 }
 
 bool ngx_http_as_operate_put(ngx_str_t url, aerospike *as)
@@ -540,7 +521,7 @@ static char* ngx_http_as_operate(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
  * It then created the connected to the cluster.
  * If the connection is succesful, it returns true, else false.
  */
-bool ngx_http_as_utils_connect(aerospike **as, ngx_http_as_hosts hosts)
+bool ngx_http_as_utils_connect(aerospike **as, ngx_http_as_hosts hosts, char response[])
 {
 	// creating and initialising the as_config object.
 	as_config cfg;
@@ -552,9 +533,17 @@ bool ngx_http_as_utils_connect(aerospike **as, ngx_http_as_hosts hosts)
 	// connecting to aerospike.
 	*as = aerospike_new(&cfg);
 	as_error err;
-	if(aerospike_connect(*as, &err)!=AEROSPIKE_OK)
-		return false;
 
+	// starting response
+	strncat(response, "{\n", strlen("{\n"));
+
+	if(aerospike_connect(*as, &err)!=AEROSPIKE_OK)
+	{
+		ngx_http_as_utils_dump_error(err, response, "");
+		return false;
+	}
+
+	ngx_http_as_utils_dump_error(err, response, "");
 	return true;
 }
 
