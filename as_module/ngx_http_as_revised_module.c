@@ -57,8 +57,8 @@ typedef struct
 
 //static u_char connected[] = "Connected to aerospike!";
 //static u_char not_connected[] = "Not connected to aerospike!";
-static u_char put_success[] = "Put successful";
-static u_char put_unsuccess[] = "Put not successful";
+//static u_char put_success[] = "Put successful";
+//static u_char put_unsuccess[] = "Put not successful";
 //static u_char get_success[] = "Get successful";
 //static u_char get_unsuccess[] = "Get not successful";
 /*static u_char connected_server[] = "Connected to server configuration!";
@@ -79,7 +79,7 @@ static char* ngx_http_as_operate(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
 
 void ngx_http_as_operate_connect(ngx_http_request_t *r, ngx_http_as_conf_t *as_conf, char response[]);
-bool ngx_http_as_operate_put(ngx_str_t url, aerospike *as);
+void ngx_http_as_operate_put(ngx_str_t url, aerospike *as, char response[]);
 void ngx_http_as_operate_get(ngx_str_t url, aerospike *as, char response[]);
 void ngx_http_as_operate_del(ngx_str_t url, aerospike *as, char response[]);
 
@@ -237,69 +237,31 @@ static ngx_int_t ngx_http_as_operate_handler(ngx_http_request_t *r)
 
 		if(strcmp("put", operation)==0)
 		{
-			if(ngx_http_as_operate_put(r->args, as_conf->as))
-			{
-				b->pos = put_success;
-				b->last = put_success + sizeof(put_success) - 1;
-
-				r->headers_out.status = NGX_HTTP_OK;
-				r->headers_out.content_length_n = sizeof(put_success)-1;
-			}
-			else
-			{
-				b->pos = put_unsuccess;
-				b->last = put_unsuccess + sizeof(put_unsuccess) - 1;
-
-				r->headers_out.status = NGX_HTTP_OK;
-				r->headers_out.content_length_n = sizeof(put_unsuccess)-1;
-			}
+			response[0] = '\0';
+			ngx_http_as_operate_put(r->args, as_conf->as, response);
 		}
 		else if(strcmp("get", operation)==0)
 		{
+			response[0] = '\0';
 			ngx_http_as_operate_get(r->args, as_conf->as, response);
 			
-			b->pos = (u_char*)response;
-			b->last = (u_char*)response + sizeof(response) - 1;
-
-			r->headers_out.status = NGX_HTTP_OK;
-			r->headers_out.content_length_n = sizeof(response)-1;
-
-			ngx_write_stderr("The final string is: \n");
-			ngx_write_stderr(response);
-			ngx_write_stderr("\n");
 		}
 		else if(strcmp("del", operation)==0)
 		{
-			char response[129000] = "\0";
+			response[0] = '\0';
 			ngx_http_as_operate_del(r->args, as_conf->as, response);
-			
-			b->pos = (u_char*)response;
-			b->last = (u_char*)response + sizeof(response) - 1;
-
-			r->headers_out.status = NGX_HTTP_OK;
-			r->headers_out.content_length_n = sizeof(response)-1;
 
 			ngx_write_stderr("The final string is: \n");
 			ngx_write_stderr(response);
 			ngx_write_stderr("\n");
 		}
-		else
-		{
-			b->pos = (u_char*)response;
-			b->last = (u_char*)response + sizeof(response) - 1;
-
-			r->headers_out.status = NGX_HTTP_OK;
-			r->headers_out.content_length_n = sizeof(response)-1;
-		}
 	}
-	else
-	{
-		b->pos = (u_char*)response;
-		b->last = (u_char*)response + sizeof(response) - 1;
 
-		r->headers_out.status = NGX_HTTP_OK;
-		r->headers_out.content_length_n = sizeof(response)-1;
-	}
+	b->pos = (u_char*)response;
+	b->last = (u_char*)response + sizeof(response) - 1;
+
+	r->headers_out.status = NGX_HTTP_OK;
+	r->headers_out.content_length_n = sizeof(response)-1;
 
 	b->memory = 1;
 	b->last_buf = 1;
@@ -366,15 +328,12 @@ void ngx_http_as_operate_connect(ngx_http_request_t *r, ngx_http_as_conf_t *as_c
 	}
 }
 
-bool ngx_http_as_operate_put(ngx_str_t url, aerospike *as)
+void ngx_http_as_operate_put(ngx_str_t url, aerospike *as, char response[])
 {
-	//ngx_write_stderr("In put function\n");
-
-
-	//ngx_http_as_conf_t *as_conf = ngx_http_get_module_loc_conf(r, ngx_http_as_module);
-
 	if(as==NULL)
-		return false;
+	{
+		strncat(response, "as object found null in as_operate_put().", strlen("as object found null in as_operate_put()."));
+	}
 
 	char key[1000], namespace[40], set[100], bin[1000], value[1000];
 
@@ -400,12 +359,11 @@ bool ngx_http_as_operate_put(ngx_str_t url, aerospike *as)
 	}
 
 	as_error err;
-	if(aerospike_key_put(as, &err, NULL, &put_key, &rec)!=AEROSPIKE_OK)
-	{
-		return false;
-	}
-	else
-		return true;
+	aerospike_key_put(as, &err, NULL, &put_key, &rec);
+	
+	// Starting the response string.
+	strncat(response, "{\n", strlen("{\n"));
+	ngx_http_as_utils_dump_error(err, response, "");
 }
 
 void ngx_http_as_operate_get(ngx_str_t url, aerospike *as, char response[])
