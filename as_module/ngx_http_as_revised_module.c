@@ -35,6 +35,14 @@
 
 // aerospike include ends.
 
+/* This is the structure used for aerospike configurations.
+ * as is the cluster object.
+ * default_hosts holds the default ip address and ports to connect to, specified in conf file.
+ * default_namespace is the default namespace to be used.
+ * connected is a flag that keeps a check if the aerospike object is connected to the cluster.
+ * use_server_conf stores, whether to use server configuration or local configuration.
+ * pool is the conf pool, used for allocating memory during request handling.
+ */
 typedef struct
 {
 	aerospike *as;
@@ -48,6 +56,11 @@ typedef struct
 	ngx_pool_t *pool;
 }ngx_http_as_conf_t;
 
+/* This is the structure that holds the ip addresses and ports, that as_config is to be initialised with.
+ * n holds the number of ip:port pairs.
+ * addresses holds the ip addresses.
+ * port holds the ports for respective ip of the same index.
+ */
 typedef struct
 {
 	int n;
@@ -55,34 +68,22 @@ typedef struct
 	int port[256];
 }ngx_http_as_hosts;
 
-//static u_char connected[] = "Connected to aerospike!";
-//static u_char not_connected[] = "Not connected to aerospike!";
-//static u_char put_success[] = "Put successful";
-//static u_char put_unsuccess[] = "Put not successful";
-//static u_char get_success[] = "Get successful";
-//static u_char get_unsuccess[] = "Get not successful";
-/*static u_char connected_server[] = "Connected to server configuration!";
-static u_char not_connected_server[] = "Could not connect to server configuration!";
-static u_char connected_local[] = "Connected to local configuration!";
-static u_char not_connected_local[] = "Could not connect to local configuration!";
-static u_char not_entered[] = "Not entered the block";
-static u_char put_success[] = "Put successful";
-static u_char put_not_success[] = "Put not successful";*/
-
-
-
+/* Functions to set up configurations */
 static void* ngx_http_as_module_create_srv_conf(ngx_conf_t *cf);
 static void* ngx_http_as_module_create_loc_conf(ngx_conf_t *cf);
-static char* ngx_http_as_connect(ngx_conf_t *cf, ngx_command_t *cmd, void* conf);
+
+/* Functions for directives */
 static char* ngx_http_as_use_srv_conf(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+static char* ngx_http_as_connect(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 static char* ngx_http_as_operate(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 
-
+/* Database operation functions called from as_operate */
 void ngx_http_as_operate_connect(ngx_http_request_t *r, ngx_http_as_conf_t *as_conf, char response[]);
 void ngx_http_as_operate_put(ngx_str_t url, aerospike *as, char response[]);
 void ngx_http_as_operate_get(ngx_str_t url, aerospike *as, char response[]);
 void ngx_http_as_operate_del(ngx_str_t url, aerospike *as, char response[]);
 
+/* Utility functions */
 bool ngx_http_as_utils_connect(aerospike **as, ngx_http_as_hosts hosts, char response[]);
 void ngx_http_as_utils_create_config(as_config *cfg, ngx_http_as_hosts hosts);
 void ngx_http_as_utils_get_hosts(char *arg, ngx_http_as_hosts *hosts);
@@ -92,6 +93,11 @@ void ngx_http_as_utils_dump_record(as_record *p_rec, as_error err, char response
 void ngx_http_as_utils_dump_bin(const as_bin* p_bin, char response[]);
 void ngx_http_as_utils_dump_error(as_error err, char response[], char* last_char);
 
+/* This structure specifies the directives for the module.
+ * as_connect - to store the default hosts for a local configuration.
+ * as_use_srv_connect - to use server configuration instead of local configuration in a location.
+ * as_operate - for various databse operations.
+ */
 static ngx_command_t ngx_http_as_commands[] = {
 	{
 		ngx_string("as_connect"),
@@ -123,6 +129,7 @@ static ngx_command_t ngx_http_as_commands[] = {
 	ngx_null_command
 };
 
+/* Specifying the contexts of the module */
 ngx_http_module_t ngx_http_as_module_ctx = {
 	NULL,
 	NULL,
@@ -137,6 +144,7 @@ ngx_http_module_t ngx_http_as_module_ctx = {
 	NULL
 };
 
+/* Declaring the module */
 ngx_module_t ngx_http_as_module = {
 	NGX_MODULE_V1,
 	&ngx_http_as_module_ctx,
@@ -193,6 +201,11 @@ static void* ngx_http_as_module_create_loc_conf(ngx_conf_t *cf)
 	return conf;
 }
 
+/* This function is the handler for the as_operate directive.
+ * It processes the http requests, and performs various database operations.
+ * For any request, first the connection is checked/made according to the parameters in the url.
+ * Then, operations like get, put, del are handled.
+ */
 static ngx_int_t ngx_http_as_operate_handler(ngx_http_request_t *r)
 {
 	// Variables for sending back response.
@@ -285,6 +298,12 @@ static ngx_int_t ngx_http_as_operate_handler(ngx_http_request_t *r)
 
 }
 
+/* This function is called to connect to the aerospike cluster.
+ * It is called from the as_operate handler when a request is being processed.
+ * If hosts are specified in the url, it connects to the new set of hosts.
+ * Else, it check if the as object is connected to the default hosts specified, if any.
+ * It then sets the connected flag as required.
+ */
 void ngx_http_as_operate_connect(ngx_http_request_t *r, ngx_http_as_conf_t *as_conf, char response[])
 {
 	// hosts stores the hosts address and ports to iniitailise the cluster object with.
@@ -337,8 +356,10 @@ void ngx_http_as_operate_connect(ngx_http_request_t *r, ngx_http_as_conf_t *as_c
 	}
 }
 
+/* This function performs the put operation. */
 void ngx_http_as_operate_put(ngx_str_t url, aerospike *as, char response[])
 {
+	// Case for debugging, if the as_object is null here.
 	if(as==NULL)
 	{
 		strncat(response, "as object found null in as_operate_put().", strlen("as object found null in as_operate_put()."));
@@ -346,17 +367,22 @@ void ngx_http_as_operate_put(ngx_str_t url, aerospike *as, char response[])
 
 	char key[1000], namespace[40], set[100], bin[1000], value[1000];
 
+	// Obtaining namespace, set, key, bin and value from url.
 	ngx_http_as_utils_get_parsed_url_arguement(url, "ns", namespace);
 	ngx_http_as_utils_get_parsed_url_arguement(url, "set", set);
 	ngx_http_as_utils_get_parsed_url_arguement(url, "key", key);
 	ngx_http_as_utils_get_parsed_url_arguement(url, "bin", bin);
 	bool is_str = ngx_http_as_utils_get_parsed_url_arguement(url, "value", value);
 
+	// Initialinsing the key.
 	as_key put_key;
 	as_key_init(&put_key, namespace, set, key);
 
+	// Initialsing the record.
 	as_record rec;
 	as_record_inita(&rec, 1);
+
+	// Checking for string/int bin.
 	if(is_str)
 	{
 		as_record_set_str(&rec, bin, value);
@@ -367,6 +393,7 @@ void ngx_http_as_operate_put(ngx_str_t url, aerospike *as, char response[])
 		as_record_set_int64(&rec, bin, value_int);
 	}
 
+	// Performing put.
 	as_error err;
 	aerospike_key_put(as, &err, NULL, &put_key, &rec);
 	
@@ -375,21 +402,24 @@ void ngx_http_as_operate_put(ngx_str_t url, aerospike *as, char response[])
 	ngx_http_as_utils_dump_error(err, response, "");
 }
 
+/* This function performs the get operation. */
 void ngx_http_as_operate_get(ngx_str_t url, aerospike *as, char response[])
 {
+	// Case for debugging, if the as_object is null here.
 	if(as==NULL)
 	{
-		ngx_write_stderr("as object null in as_operate_get\n");
 		strncat(response, "as object null in as_operate_get\n", strlen("as object null in as_operate_get\n"));
 		return;
 	}
 
 	char key[1000], namespace[40], set[100];
 
+	// Obtaining namespace, set, key from url.
 	ngx_http_as_utils_get_parsed_url_arguement(url, "ns", namespace);
 	ngx_http_as_utils_get_parsed_url_arguement(url, "set", set);
 	ngx_http_as_utils_get_parsed_url_arguement(url, "key", key);
 
+	// Initialinsing the key.
 	as_key get_key;
 	as_key_init_str(&get_key, namespace, set, key);
 
@@ -399,7 +429,7 @@ void ngx_http_as_operate_get(ngx_str_t url, aerospike *as, char response[])
 	// Starting the json formatted string.
 	strncat(response, "{\n", strlen("{\n"));
 
-	// Read the (whole) test record from the database.
+	// Read the (whole) test record from the database and generating response.
 	if (aerospike_key_get(as, &err, NULL, &get_key, &p_rec) != AEROSPIKE_OK)
 	{
 		ngx_http_as_utils_dump_error(err, response, "");
@@ -411,8 +441,10 @@ void ngx_http_as_operate_get(ngx_str_t url, aerospike *as, char response[])
 	}
 }
 
+/* This function performs the delete operation. */
 void ngx_http_as_operate_del(ngx_str_t url, aerospike *as, char response[])
 {
+	// Case for debugging, if the as_object is null here.
 	if(as==NULL)
 	{
 		ngx_write_stderr("as object null in as_operate_del\n");
@@ -422,6 +454,7 @@ void ngx_http_as_operate_del(ngx_str_t url, aerospike *as, char response[])
 
 	char key[1000], namespace[40], set[100];
 
+	// Obtaining namespace, set, key from url.
 	ngx_http_as_utils_get_parsed_url_arguement(url, "ns", namespace);
 	ngx_http_as_utils_get_parsed_url_arguement(url, "set", set);
 	ngx_http_as_utils_get_parsed_url_arguement(url, "key", key);
@@ -525,7 +558,7 @@ void ngx_http_as_utils_create_config(as_config *cfg, ngx_http_as_hosts hosts)
 	}
 }
 
-/*This function takes as argument a character array of ip ports separeated by ";" which in turn are separated by ",".
+/* This function takes as argument a character array of ip ports separeated by ";" which in turn are separated by ",".
  * It parses them into individual host ips and ports.
  */
 void ngx_http_as_utils_get_hosts(char *arg, ngx_http_as_hosts *hosts)
@@ -571,8 +604,16 @@ void ngx_http_as_utils_get_hosts(char *arg, ngx_http_as_hosts *hosts)
 	}
 }
 
+/* This function parses the url, for the value of a particular argument.
+ * It takes as parameter three arguments, ngx_str_t, char*, char*.
+ * The first argument is the url to be parsed.
+ * The second argument is the name of the argument in the url whose value is to be found.
+ * The third argument is the array where the value is to be stored.
+ * It returns a bool, if the value is a string/int.
+ */
 bool ngx_http_as_utils_get_parsed_url_arguement(ngx_str_t url, char* arg, char value[])
 {
+	// variables to be used.
 	char temp2[1000], temp3[1000];
 	char temp_args[100][1000];
 	int pos = 0, i;
@@ -581,17 +622,19 @@ bool ngx_http_as_utils_get_parsed_url_arguement(ngx_str_t url, char* arg, char v
 	int len = url.len;
 	char url_string[len];
 
+	// if there are arguments in url.
 	if(len>0)
 	{
+		// parsing to remove the space at the end of the url.
 		char *temp = strtok((char*)url.data, " ");
+
+		// copying the part of the url with arguments without a space, in a variiable.
 		strcpy(url_string, temp);
+
 		while(temp!=NULL)
 			temp = strtok(NULL, " ");
 
-		//ngx_write_stderr("writng space removed_string: ");
-		//ngx_write_stderr(url_string);
-		//ngx_write_stderr("\n");
-
+		// parsing the url with "&", i.e. for different arguments, and storing each name value pair.
 		temp = strtok(url_string, "&");
 		while(temp!=NULL)
 		{
@@ -601,6 +644,7 @@ bool ngx_http_as_utils_get_parsed_url_arguement(ngx_str_t url, char* arg, char v
 			temp = strtok(NULL, "&");
 		}
 
+		// for each name value pair, parsing the pair, and checking for the required arguments, specified by arg.
 		for(i=0; i<pos; i++)
 		{
 			temp = strtok(temp_args[i], "=");
@@ -608,6 +652,7 @@ bool ngx_http_as_utils_get_parsed_url_arguement(ngx_str_t url, char* arg, char v
 
 			temp = strtok(NULL, "=");
 
+			// if the name-value pair found, copying the value, and setting the flag.
 			if(strcmp(temp2, arg)==0)
 			{
 				flag = 1;
@@ -616,19 +661,18 @@ bool ngx_http_as_utils_get_parsed_url_arguement(ngx_str_t url, char* arg, char v
 			}
 		}
 
+		// if name value pair found.
 		if(flag)
 		{
+			// checking for string/int
 			is_str = (temp3[0]=='%')?true:false;
 
+			// replacing %22 with "\""
 			ngx_http_as_utils_replace(temp3, "%22", "\"");
-			//ngx_write_stderr("writng value string: ");
-			//ngx_write_stderr(temp3);
-			//ngx_write_stderr("\n");
+				
 			temp = strtok(temp3, "\"");
 
-			//ngx_write_stderr("writng parsed_string: ");
-			//ngx_write_stderr(temp);
-			//ngx_write_stderr("\n");
+			// if the value is not null, copying it into value.
 			if(temp!=NULL)
 				strcpy(value, temp);
 		}
@@ -637,6 +681,7 @@ bool ngx_http_as_utils_get_parsed_url_arguement(ngx_str_t url, char* arg, char v
 	return is_str;
 }
 
+/* This function replaces all occurances of a sequences of characters in a string with other. */
 void ngx_http_as_utils_replace(char * o_string, char * s_string, char * r_string)
 {
       //a buffer variable to do all replace things
@@ -764,6 +809,10 @@ void ngx_http_as_utils_dump_record(as_record *p_rec, as_error err, char response
 	strncat(response, "}", strlen("}"));
  }
 
+/* This function creates the json formatted string for an error.
+ * The first parameter is the error object, whose json formatting is to be done.
+ * The second parameter is a character array, which stores the json of the record.
+ */
  void ngx_http_as_utils_dump_error(as_error err, char response[], char* last_char)
  {
  	//Starting the error block.
